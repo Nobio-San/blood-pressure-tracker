@@ -1,0 +1,189 @@
+```md
+## 1. 目的とスコープ
+- 目的: 血圧記録Webアプリを **PWA（インストール可能なWebアプリ）** として成立させ、**最低限のオフライン動作（アプリシェル表示）** を実現する。
+- スコープ（やる）:
+  - `manifest.json` を追加し、インストール可能にする（standalone起動・アイコン表示）。
+  - Service Worker を追加し、**HTML/CSS/JS/主要アセットをキャッシュ**してオフラインでも起動できるようにする。
+  - `index.html` に PWA 設定（manifest参照、theme-color、SW登録、Apple向け最小設定）を入れる。
+  - キャッシュ更新（古いキャッシュの破棄）と、更新時の挙動ルールを決める。
+- 非スコープ（やらない）:
+  - オフライン時の **API（Google Apps Script 等）通信の成立**、同期キュー、バックグラウンド同期。
+  - データ整合性（競合解決）やクラウド同期の高度化。
+  - PWAスコア最適化（スコア追い）。「インストール + 最低限オフライン」を満たす範囲に限定。
+
+## 2. 技術スタック
+- 使用言語: HTML / CSS / JavaScript（ES Modules）
+- 主要技術: Web App Manifest / Service Worker / Cache Storage
+- 依存/前提:
+  - HTTPS（または `localhost`）で配信されること（SWの前提）。
+  - 配信パス（ドメイン直下 or サブディレクトリ）が確定していること。
+  - 外部FW（React/Vue等）は **追加しない**（指定がないため）。
+
+## 3. ディレクトリ/ファイル方針
+- 既存（想定）:
+  - `index.html`
+  - `css/style.css`
+  - `js/app.js`
+  - （存在する場合）`js/sheets-api.js` など
+- 追加（PWA基本）:
+  - `manifest.json`（ルート直下）
+  - `service-worker.js`（ルート直下）
+  - `icons/`（ディレクトリ）
+    - `icons/icon-192.png`
+    - `icons/icon-512.png`
+    - `icons/apple-touch-icon.png`（推奨: 180x180）
+  - （任意）`offline.html`（専用オフラインページを採用する場合のみ）
+  - `README.md`（配信パス/運用ルールを追記）
+- 読み込み順（原則）:
+  - HTML → CSS → JS
+  - PWA設定は `index.html` の `<head>`（manifest/meta/icon）と、`<script>` でのSW登録（または `js/app.js` 初期化）
+
+## 4. コーディング規約（横断）
+- 命名:
+  - JavaScript: lowerCamelCase
+  - CSS: BEM（`block__elem--mod`）または Utility のどちらかに統一（混在しない）
+- コメント: 原則日本語。関数の「入出力・副作用」を先頭1行で書く。
+- 構造:
+  - 設定/定数・ドメインロジック・I/O・UI更新を層分離（SWは別枠）。
+  - グローバル共有を最小化し、関数は入出力を明記。
+- 例外処理:
+  - Service Worker 登録は失敗してもアプリが壊れないようにガード（try/catch + ログ）。
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 配信パス（base path）とスコープを最初に固定
+- TODO: 配信が **ドメイン直下** か **サブパス配信** かを確定する。
+  - パターンA（ドメイン直下）:
+    - `start_url`: `/`
+    - `scope`: `/`
+    - `index.html` から `href="/manifest.json"`
+  - パターンB（サブパス配信例: `/blood-pressure-tracker/`）:
+    - `start_url`: `./`（推奨）または `/blood-pressure-tracker/`
+    - `scope`: `./`（推奨）または `/blood-pressure-tracker/`
+    - `index.html` から `href="./manifest.json"`
+- Service Worker は **制御したいスコープ直下** に置く（基本は配信ルート直下）。
+
+### 5.2 manifest.json（インストール要件の中核）
+- 必須プロパティ（基本）:
+  - `name`, `short_name`, `description`
+  - `display: "standalone"`
+  - `orientation: "portrait"`
+  - `theme_color`, `background_color`（UIと整合）
+  - `start_url`（上記 5.1 の結論に合わせる）
+  - `icons`: 192 / 512 を必ず用意し、パスは実在するものだけにする
+- 任意（必要になったら）:
+  - `lang: "ja"`, `categories`, `id` は「理由が説明できる時だけ」追加
+
+### 5.3 icons（見た目で失敗しやすいポイント）
+- `icons/icon-192.png`（192x192）, `icons/icon-512.png`（512x512）を必須。
+- 透過は可能だが、ホーム画面で埋もれないよう **背景色込み** を推奨（theme_colorと相性重視）。
+- iOS向けに `icons/apple-touch-icon.png`（推奨: 180x180）を用意し、`index.html` で参照。
+
+### 5.4 index.html（PWA設定の集約）
+- `<head>` に以下を追加（パスは 5.1 に従う）:
+  - `<link rel="manifest" href="...">`
+  - `<meta name="theme-color" content="#2196F3">`（色はプロジェクトで確定）
+  - `<link rel="apple-touch-icon" href="...">`
+  - （任意）`<meta name="apple-mobile-web-app-capable" content="yes">` 等は最小限
+- SW登録:
+  - 入口は `index.html` でも `js/app.js` でも良いが **どちらか一箇所に統一**。
+  - 登録コードは「存在チェック + 失敗しても継続」
+    - `if ('serviceWorker' in navigator) { ... }`
+
+### 5.5 service-worker.js（基本キャッシュ + オフライン起動）
+- キャッシュ名はバージョン付き（例: `bp-cache-v1`）。更新時は v2 に上げる。
+- install:
+  - **プリキャッシュは最小から開始**（1つでも404があると install 失敗しやすい）
+  - 対象（例）:
+    - `index.html`
+    - `css/style.css`
+    - `js/app.js`
+    - `manifest.json`
+    - `icons/icon-192.png`, `icons/icon-512.png`, `icons/apple-touch-icon.png`
+    - （必要なら）`js/sheets-api.js` 等
+- activate:
+  - 古いキャッシュを削除し、キャッシュが残り続けないようにする。
+- fetch:
+  - **GETのみ** を対象（POSTやAPI更新系は触らない）。
+  - 静的アセット（CSS/JS/画像）は **Cache First**（キャッシュ→ネット→保存）。
+  - HTMLは方針を固定（どちらか）:
+    - 方針A（基本）: `index.html` をプリキャッシュし、オフライン時はそれを返す
+    - 方針B（必要時）: HTMLだけ Network First（失敗時にキャッシュへフォールバック）
+  - APIドメイン（例: Google Apps Script）は **Network Only** か除外してキャッシュしない。
+- オフラインフォールバック:
+  - 原則 `index.html` を返す（専用 `offline.html` を導入する場合は、その導入理由と対象URLをREADMEへ明記）。
+
+### 5.6 更新運用（SWが残る問題を起こさない）
+- 基本方針: 「勝手に切り替えない」
+  - `skipWaiting()` / `clientsClaim()` は **原則OFF**
+  - 使う場合は「更新検知→再読み込み導線（バナー/ボタン）」を必ず用意
+- バージョン更新ルール:
+  - 破壊的変更・キャッシュ対象変更時は **キャッシュ名のvを上げる**
+  - `activate` で旧キャッシュ削除が走ることを DevTools で確認する
+
+### 5.7 オフライン中のユーザー通知（最小）
+- `navigator.onLine` と `online/offline` イベントで、UIに小さく「オフライン中」表示（邪魔にならない設計）。
+- 重要: ここでは「同期」はしない。オフラインでも入力ができる設計が必要なら、別フェーズで扱う。
+
+## 6. UI/UX・入力操作の規約
+- 追加UIは最小。目的は「インストール + オフライン起動」
+- オフライン表示:
+  - 画面上部の小バナー等で状態を示す（例: `position: sticky` + 小さな高さ）
+  - オンライン復帰で自動的に消える
+- アクセシビリティ:
+  - `<header> <main> <footer>` 等のセマンティック要素を優先
+  - ボタン/入力には `aria-label` 等で補助（既存UIに合わせて最小限）
+
+## 7. パフォーマンス/品質
+- キャッシュ対象は「アプリシェル中心」。画像や大容量ファイルを無制限に増やさない。
+- CDN依存がある場合の方針:
+  - オフラインで必須ならローカル同梱に切り替える
+  - 必須でないなら、オフライン時の機能制限を明文化
+- デバッグログ:
+  - SW登録・更新検知のみ最小ログ。恒常的な大量ログは禁止。
+
+## 8. テスト/デバッグ（DoD: Definition of Done）
+- DevTools（Chrome）:
+  - Application > Manifest: エラーなし、icons表示、start_urlが正しい
+  - Application > Service Workers: 登録済み、scopeが期待どおり
+  - Application > Cache Storage: プリキャッシュが入っている
+  - Network: Offlineで再読み込みしてもトップ画面（最低限UI）が表示される
+- Android実機（Chrome）:
+  - 「ホーム画面に追加（インストール）」できる
+  - 追加したアイコンから起動し **standalone表示** になる
+  - 機内モード（通信OFF）でも起動し、最低限UIが表示される
+  - アイコンが意図どおり表示される
+- Lighthouse（任意・穴埋め目的）:
+  - 「インストール不能」級の指摘（manifest不足、SW未登録など）が残っていない
+
+## 9. リリース/更新運用
+- `README.md` に必ず残すこと:
+  - 配信パス（base path）と `start_url/scope` の採用値
+  - SW配置場所とスコープの理由
+  - キャッシュ名（例: `bp-cache-v1`）と更新手順（いつvを上げるか）
+  - DevToolsでの更新テスト手順（unregister / hard reload など）
+- `todo.md` / 計画更新時:
+  - ファイル追加・パス変更・オフライン要件変更は、本ルールの「5. 実装ルール」と「8. DoD」に反映する
+
+## 10. 禁止事項/アンチパターン
+- 存在しないパスをプリキャッシュに入れる（SW install失敗の原因）
+- setInterval乱用で擬似キャッシュ更新をする（SWのライフサイクルに従う）
+- APIレスポンスを安易にキャッシュして最新データが取れなくなる実装
+- 外部フレームワークや大規模ビルド導入（要件にない拡張）
+- SW登録失敗でアプリ本体が動かなくなる実装
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（例: 「manifest追加」「SWプリキャッシュ実装」「index.htmlへPWA設定追加」）
+- PR本文テンプレ（日本語）:
+  - 目的 / 変更点 / 動作確認（DevTools項目 + 実機項目） / スクリーンショット（任意）
+```
+
+```md
+生成ログ
+- 主要要件を抽出: manifest.json / service-worker.js / icons(192,512,Apple) / index.html設定 / 最低限オフライン（アプリシェル）
+- 重要な前提を固定: 配信パス（ドメイン直下 or サブパス）により start_url/scope/linkパスが変わるため、5.1にTODOとして明示
+- 実装方針を具体化: GETのみ対象、静的アセットはCache First、APIは除外（Network Only）
+- 失敗しやすい点をルール化: 404をプリキャッシュに入れない、CDN依存はオフライン白画面の原因
+- DoDをチェックリスト化: DevTools / Android実機 / Offline再読み込み / standalone起動 / アイコン表示
+- 追加で補完した規約: 命名・層分離・コメント日本語・SW登録のガード、更新運用（キャッシュ名バージョン）
+```
+

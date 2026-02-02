@@ -1,0 +1,174 @@
+---
+name: blood-pressure-tracker
+description: This is a new rule
+---
+
+# Overview
+
+```md
+# Project Rules（Cursor貼り付け用）
+
+## 1. 目的とスコープ
+- 目的: **血圧記録アプリ（Blood Pressure Tracker）** のプロジェクト初期設定として、基本ファイル構造と最小の表示・動作確認ができる土台を作る。
+- スコープ（Phase1 Step1-1）:
+  - `blood-pressure-tracker/` 配下に指定のディレクトリ/ファイルを作成
+  - `index.html` で「ヘッダー表示」＋ `#app` コンテナ表示
+  - `app.js` が `DOMContentLoaded` で初期化ログを出す
+  - `style.css` にリセット＋モバイルファーストの基本スタイルを用意
+  - `README.md` と `.gitignore` を整備
+- 非スコープ:
+  - 入力フォームUI（次工程 Step1-2）
+  - データ保存（localStorage/DB）
+  - グラフ表示、分析機能、認証/バックエンド
+  - ビルドツール導入（Vite/React/Vue等）、パッケージ管理必須化
+
+## 2. 技術スタック
+- 使用言語: HTML / CSS / JavaScript（ブラウザ実行、ビルド不要を基本）
+- 依存/前提:
+  - 外部フレームワークは導入しない（指定が出た場合のみ）
+  - 文字コードはUTF-8
+  - JSは `defer` で読み込み（初期化は `DOMContentLoaded`）
+
+## 3. ディレクトリ/ファイル方針
+- 作成する構造（固定）:
+```
+
+blood-pressure-tracker/
+├── index.html
+├── css/
+│   └── style.css
+├── js/
+│   └── app.js
+├── README.md
+└── .gitignore
+
+```
+- 読み込み順:
+- HTML → CSS（`css/style.css`）→ JS（`js/app.js` を `defer`）
+- 設定/定数（将来拡張用）:
+- 数値・文字列定数が増えたら `js/constants.js` を追加して集約（**TODO: 次工程で導入可否を決める**）
+
+## 4. コーディング規約（横断）
+- 命名:
+- JavaScript: lowerCamelCase（例: `initApp`, `renderHeader`）
+- CSS: BEM（`block__elem--mod`）か Utility のどちらかに統一（本プロジェクトは **BEM推奨**）
+- コメント:
+- 原則日本語。関数の「目的/入出力/副作用」を先頭1行で明記する
+- 構造:
+- 「設定/定数」「ドメインロジック」「I/O」「UI更新」を分離する（小さくても意識する）
+- 依存:
+- グローバル変数を増やさない。必要な値は関数引数で受け渡す
+- 例外/エラー:
+- 初期フェーズは `console.error` で十分。ただし握り潰さない
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 `index.html`
+- 必須要件:
+- HTML5のDOCTYPE
+- `<meta charset="UTF-8">`
+- `<meta name="viewport" content="width=device-width, initial-scale=1.0">`
+- `<title>血圧記録アプリ</title>`
+- `<link rel="stylesheet" href="css/style.css">`
+- `<script src="js/app.js" defer></script>`
+- レイアウト（最小）:
+- シンプルなヘッダー（アプリタイトル表示）
+- メインコンテナ: `<main id="app">`（**id="app" は固定**）
+- アクセシビリティ:
+- ヘッダーは `<header>`、本文は `<main>` を使用（landmark）
+- 可能なら `h1` を1つに統一
+
+### 5.2 `css/style.css`
+- 必須要件:
+- リセットCSS（基本的な `margin/padding` の初期化）
+- モバイルファースト（最小幅前提で組む）
+- レスポンシブの基本（`max-width`、余白、可読性）
+- 推奨スタイル（例）:
+- `body` は読みやすいフォントサイズ/行間、背景色、余白
+- `#app` は中央寄せ＋適切なパディング
+- ブレークポイントは必要になったタイミングで追加（**TODO: UI確定後**）
+
+### 5.3 `js/app.js`
+- 必須要件:
+- `document.addEventListener('DOMContentLoaded', ...)` を使用
+- 初期化関数（例: `initApp()`）を用意し、そこで処理を開始
+- 動作確認用に `console.log` で初期化メッセージを出す（例: "App initialized"）
+- 実装方針:
+- 初期化の中でDOM参照をまとめる（例: `const appEl = document.getElementById('app')`）
+- 将来の拡張を見据え、UI描画関数を分ける（例: `renderLayout(appEl)`）
+
+### 5.4 `README.md`
+- 必須要件:
+- プロジェクト名: **Blood Pressure Tracker**
+- 概要説明（何をするアプリか）
+- 目的と機能（現時点は「血圧の記録を行うアプリの土台」まででOK）
+- 使用技術（HTML/CSS/JS）
+- セットアップ方法（例: `index.html` をブラウザで開く）
+
+### 5.5 `.gitignore`
+- 必須要件（最低限）:
+- `node_modules/`
+- `.DS_Store`
+- `*.log`
+- その他一般的な除外（必要に応じて追加）
+
+## 6. UI/UX・入力操作の規約
+- UI（このフェーズの最低限）:
+- 画面上部にアプリ名が分かるヘッダー
+- 主要UIを置く領域は `#app` に集約（将来、フォームや一覧をここに追加）
+- 入力操作:
+- 本フェーズではフォームやキー操作は未実装（**TODO: Step1-2 で定義**）
+
+## 7. パフォーマンス/品質
+- 初期表示は軽量に:
+- 参照するDOM要素は必要最小限
+- `DOMContentLoaded` 以前にDOMへ触らない
+- CSS:
+- 過度なネストや重いセレクタを避ける
+- JS:
+- ループ処理やタイマー乱用をしない（このフェーズは不要）
+
+## 8. テスト/デバッグ（DoD）
+- ファイル配置:
+- すべてのファイルが指定の場所に作成されている
+- 画面表示:
+- `index.html` をブラウザで開くと、ページタイトルとヘッダーが表示される
+- `#app` コンテナがDOM上に存在する
+- コンソール:
+- ブラウザのコンソールに初期化メッセージが表示される
+- エラーが出ていない
+- モバイル確認:
+- 開発者ツールのモバイルビューで、横スクロールせず閲覧できる（最低限）
+
+## 9. リリース/更新運用
+- `todo.md`（相当資料）更新時:
+- 変更点（ファイル構成/タイトル/読み込み順/数値要件）を本ルールへ差分反映
+- 変更管理（推奨）:
+- Issue/PRに「目的 / 変更点 / 確認観点 / スクリーンショット（任意）」を記載
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部FW導入（React/Vue等）
+- `index.html` に大量のインラインJS/インラインCSSを埋め込む
+- `defer` を外して読み込み順依存のバグを作る
+- 魔法数・ハードコード文字列を散在させる（増えたら `constants` に寄せる）
+- 目的のない複雑化（早すぎる抽象化/過剰な設計）
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（例: "初期ファイル構造を追加"）
+- メッセージは日本語で「要点→効果→影響範囲」
+- PRは小さく、自己レビュー用チェック（DoD）を貼る
+
+---
+
+### 付録A: 言語別要点（本プロジェクトの基準）
+- HTML: セマンティック/landmark、必要に応じてaria属性
+- CSS: BEM（またはUtility）に統一、レスポンシブはモバイルファースト
+- JS: 初期化（DOMContentLoaded）→ DOM取得 → 描画/処理の分離を意識
+```
+
+```md
+# 生成ログ
+- 入力から抽出: 血圧記録アプリの初期設定（Phase1 Step1-1）、固定のディレクトリ構造、`index.html` の必須メタ/読み込み、`app.js` のDOMContentLoaded＋初期化ログ、CSSはリセット＋モバイルファースト、README/.gitignore 作成、確認チェックリスト。
+- 既定で補完: 命名（JS lowerCamelCase / CSS BEM）、コメント日本語、層分離の考え方、アクセシビリティ（header/main/見出し）、禁止事項（外部FW/インライン乱用/魔法数散在）。
+- 未確定（TODO扱い）: Step1-2以降で「入力UI」「データ保存方式」「constantsファイル導入」「ブレークポイント」などを確定してルールへ追記する。
+```
+

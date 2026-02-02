@@ -1,0 +1,184 @@
+```md
+# ProjectRules.md（Cursor Project Rules 貼り付け用）
+
+## 1. 目的とスコープ
+- 目的: ローカルストレージに保存された血圧記録を、アプリ画面で「最新順・直近10件」を中心に一覧表示し、削除（確認付き）と（任意）メンバー絞り込みを提供する。
+- スコープ（やること）:
+  - 記録一覧UI（テーブル/カード）
+  - 一覧描画ロジック（ソート/件数制限/フォーマット/空状態）
+  - 削除機能（confirm→localStorage更新→即時再描画）
+  - （任意）メンバー絞り込み（select）
+  - レスポンシブ対応（スマホで横スクロール or カード）
+  - 最低限の動作検証（DoDに準拠）
+- 非スコープ（やらないこと）:
+  - 外部フレームワーク導入（React/Vue等）
+  - サーバー/DB連携、認証、クラウド同期
+  - 高度な分析・グラフ表示（次工程）
+
+## 2. 技術スタック
+- 使用言語: HTML / CSS / JavaScript（バニラ）
+- 前提/制約:
+  - PWA（モバイルファースト）
+  - 依存ライブラリは極力増やさない（原則ゼロ）
+  - 高齢者利用も想定し、可読性とタップ領域を優先
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル（想定）:
+  - `index.html`
+  - `css/style.css`
+  - `js/app.js`
+  - （推奨）`js/constants.js`：定数・設定（最大表示件数、localStorageキー等）を集約
+- 読み込み順:
+  - HTML → CSS → JS（`<script type="module" src="js/app.js"></script>` を推奨）
+- 定数/設定の置き場所:
+  - **魔法数は禁止**。表示件数、localStorageキー、日時表示形式などは `constants.js`（または `app.js` 冒頭の `const` 群）へ。
+
+## 4. コーディング規約（横断）
+- 命名:
+  - JS: lowerCamelCase（例: `refreshRecordList`, `formatDateTime`）
+  - CSS: BEM（`block__elem--mod`）または Utility のどちらかに統一（混在しない）
+- 構造（層分離）:
+  - **設定/定数** / **データ操作（ドメイン）** / **I/O（localStorage）** / **UI描画** / **イベント** を分ける
+- コメント:
+  - 原則日本語。関数先頭に「何を返すか/副作用」を1行で書く（例: `// 記録配列を日時降順にソートして返す（破壊しない）`）
+- 安全性:
+  - DOM組み立ては可能な限り `textContent` を使う（XSS回避）
+  - localStorage のJSONが壊れていてもアプリが落ちない（例外を握って空配列にフォールバック）
+- 依存:
+  - グローバル共有を最小化。状態は `refreshRecordList()` のパイプラインで都度構築する（単一ソース）
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 データ仕様（localStorage）
+- 保存形式（前提）:
+  - 配列（records）をJSONで保存
+  - 各要素は最低限以下を持つ
+    - `id`（ユニーク）
+    - `member`（文字列）
+    - `systolic`（数値）
+    - `diastolic`（数値）
+    - `pulse`（数値）
+    - `datetime`（ISO 8601 文字列: `new Date().toISOString()` を推奨）
+- localStorageキー:
+  - `RECORDS_STORAGE_KEY` として定数化する
+  - TODO: ???（既存Step 1-3の保存処理から実キー名を確定すること）
+
+### 5.2 一覧更新の単一フロー
+- 一覧更新は **必ず** `refreshRecordList()` に集約し、以下の順で処理する:
+  1) `loadRecords()`（壊れたJSONは空配列）
+  2) （任意）`filterRecordsByMember(records, memberFilter)`
+  3) `sortRecordsDescByDatetime(records)`（Date変換で比較）
+  4) `limitRecords(records, MAX_LIST_COUNT)`
+  5) `renderRecords(records)`（0件は空状態）
+
+### 5.3 表示要件の具体化
+- 並び順: `datetime` 降順（最新が上）
+- 表示件数: 直近 `MAX_LIST_COUNT` 件（デフォルト10、将来変更可能な定数）
+- フォーマット:
+  - 日時: `YYYY/MM/DD HH:MM`（例）
+  - 血圧: `最高/最低 mmHg`（例: `120 / 80 mmHg`）
+  - 脈拍: `bpm`（例: `70 bpm`）
+- フォールバック:
+  - `datetime` が不正/空の場合、並び替えでは末尾扱い、表示は `-` などにする
+
+### 5.4 削除要件
+- 各行/カードに削除ボタンを配置し、クリックで `confirm("この記録を削除しますか？")` を表示
+- OKなら `id` で対象を除外して保存し、`refreshRecordList()` で即時反映
+- キャンセルなら何もしない
+- 削除後フィードバック（例: 「削除しました」）を共通メッセージ領域に表示
+
+### 5.5 イベント管理（増殖防止）
+- イベントリスナーは初期化時に **1回だけ** 設定
+- 削除クリックはイベント委譲（例: `container.addEventListener('click', ...)` + `e.target.closest(...)`）を採用
+
+## 6. UI/UX・入力操作の規約
+- 画面構成:
+  - 入力フォームの下（または別カード）に「記録一覧」セクションを配置
+  - 一覧描画先コンテナを用意（例: `#recordList`）
+  - 空状態表示要素を用意（例: `#recordListEmpty`）
+  - 件数表示を用意（例: `#recordCount`）
+- （任意）メンバー絞り込み:
+  - `select` を使用し、「全員」+ メンバー一覧を提供
+  - TODO: メンバー一覧のソース（入力フォームと共通化するなら定数化）
+- 操作性/アクセシビリティ:
+  - ボタンのタップ領域は **44px以上** を目安
+  - 削除ボタンに `aria-label`（例: `aria-label="記録を削除"`）
+  - Tab移動で削除ボタン/フィルタが操作できる
+  - 文字サイズを拡大しても破綻しない（ブラウザズーム検証）
+
+## 7. パフォーマンス/品質
+- DOM更新:
+  - まとめて更新（DocumentFragment等）し、無駄な再レイアウトを避ける
+  - 大量件数に備え、描画前に `filter/sort/limit` を済ませる
+- 再計算の抑制:
+  - 同じフォーマット処理を繰り返さない（必要ならキャッシュ）
+- 例外耐性:
+  - localStorage の不正JSON、空、想定外の型でも「空状態」に落として継続
+
+## 8. テスト/デバッグ（DoD: 達成条件）
+- 受け入れ（必須）:
+  - localStorage の記録が **最新が上** で表示される
+  - **直近10件**（定数で変更可能）だけ表示される
+  - 削除ボタン → 確認 → 削除後に一覧が **即時更新** される
+  - スマホで視認・操作しやすい（横スクロール or カード）
+- 動作検証チェックリスト:
+  - 1件/複数件/0件で表示が崩れない
+  - 11件以上で古いものが表示されない
+  - 先頭/末尾の削除、0件になった場合の空状態
+  - （任意）フィルタ切替が効き、追加/削除と併用しても破綻しない
+  - localStorage を削除/破損させても落ちずに初期表示できる
+  - コンソールエラーが無い
+- デバッグ方針:
+  - `DEBUG` フラグでログON/OFF（本番ではOFF）
+
+## 9. リリース/更新運用
+- `todo.md / plan.md` 更新時:
+  - 数値（件数、フォーマット）、ファイル構成、UI要件、操作の変更は **本ルールへ差分反映**
+- 変更手順（推奨）:
+  - 変更点を Issue に起票 → 実装 → DoDチェック → 画面キャプチャ（任意）
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部FW/大型ライブラリ導入
+- 行ごとに `addEventListener` を付ける（イベント増殖）
+- localStorageアクセスが各所に散らばる（`load/save` に集約）
+- 魔法数の散在（件数、キー名、フォーマット文字列など）
+- 描画とロジックの密結合（テスト不能化）
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（小さく頻繁に）
+- メッセージは日本語で「要点 → 効果 → 影響範囲」
+- PR/差分説明には以下を含める:
+  - 目的 / 変更点 / 確認観点（DoDから抜粋）
+
+---
+
+### 付録A: 実装関数の最小セット（推奨名）
+- localStorage I/O:
+  - `loadRecords(): Record[]`
+  - `saveRecords(records: Record[]): void`
+- 変換・整形:
+  - `formatDateTime(datetimeIso: string): string`
+  - `formatBP(systolic: number, diastolic: number): string`
+  - `formatPulse(pulse: number): string`
+- 一覧制御:
+  - `sortRecordsDescByDatetime(records: Record[]): Record[]`（破壊しない）
+  - `limitRecords(records: Record[], maxCount: number): Record[]`
+  - `filterRecordsByMember(records: Record[], member: string | null): Record[]`
+- UI:
+  - `renderRecords(records: Record[], options?): void`
+  - `refreshRecordList(): void`
+
+### 付録B: CSS最小方針（例）
+- `.records-card`：一覧セクションのカード
+- `.table-scroll`：横スクロールラッパー（`overflow-x: auto`）
+- `.btn` / `.btn--danger`：削除ボタン（タップ領域確保）
+```
+
+```md
+# 生成ログ（要約）
+- 要件抽出: localStorageの血圧記録を「最新順・直近10件」表示、削除（confirm付き）、（任意）メンバー絞り込み、スマホ対応。
+- ファイル想定: `index.html` / `css/style.css` / `js/app.js`（＋定数集約のため `js/constants.js` を推奨）。
+- 実装の単一フロー: `refreshRecordList()` を中核に、load→filter→sort→limit→render を固定。
+- 品質要件: イベント委譲でリスナー増殖防止、0件/11件/破損JSONなどの耐性、アクセシビリティ（aria/44px）。
+- 未確定点: localStorageキー名、メンバー一覧のソース（入力フォームと共通化するか）を TODO として明示。
+```
+

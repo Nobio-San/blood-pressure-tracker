@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>血圧記録アプリ</title>
+    
+    <!-- PWA設定 -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#4a90e2">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="血圧記録">
+    
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Chart.js 4.x CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="js/sheets-api.js" defer></script>
+    <script src="js/app.js" defer></script>
+    
+    <!-- Service Worker登録 -->
+    <script>
+        // Service Worker登録（PWAのオフライン機能を有効化）
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(registration => {
+                        console.log('[SW] 登録成功:', registration.scope);
+                        
+                        // SW更新検知（新しいSWが待機中の場合）
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            if (newWorker) {
+                                newWorker.addEventListener('statechange', () => {
+                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        console.log('[SW] 新しいバージョンが利用可能です');
+                                        // 更新通知は今後のフェーズで実装
+                                    }
+                                });
+                            }
+                        });
+                    })
+                    .catch(error => {
+                        console.error('[SW] 登録失敗:', error);
+                        // SW登録失敗してもアプリは継続動作
+                    });
+            });
+        } else {
+            console.warn('[SW] このブラウザはService Workerに対応していません');
+        }
+    </script>
+</head>
+<body>
+    <!-- オフライン通知バナー -->
+    <div id="offlineBanner" class="offline-banner" role="alert" aria-live="polite">
+        <span class="offline-banner__icon">⚠️</span>
+        <span>オフラインモード - インターネット接続がありません</span>
+    </div>
+    
+    <header>
+        <h1>血圧記録アプリ</h1>
+    </header>
+    <main id="app">
+        <section class="form-section">
+            <h2 class="form-section__title">血圧を記録する</h2>
+            <!-- メッセージ表示領域 -->
+            <div id="message" class="message" role="status" aria-live="polite"></div>
+            <form id="recordForm" class="record-form" novalidate>
+                <!-- 家族メンバー選択 -->
+                <div class="form-field">
+                    <label for="member" class="form-field__label">記録者</label>
+                    <select id="member" name="member" class="form-field__input" required>
+                        <option value="">選択してください</option>
+                        <option value="自分">自分</option>
+                        <option value="配偶者">配偶者</option>
+                        <option value="父">父</option>
+                        <option value="母">母</option>
+                    </select>
+                </div>
+
+                <!-- 血圧入力（最高/最低） -->
+                <div class="form-field-group">
+                    <div class="form-field">
+                        <label for="systolic" class="form-field__label">最高血圧</label>
+                        <input 
+                            type="number" 
+                            id="systolic" 
+                            name="systolic" 
+                            class="form-field__input" 
+                            min="50" 
+                            max="250" 
+                            step="1"
+                            inputmode="numeric"
+                            placeholder="50〜250"
+                            required
+                            aria-describedby="systolic-help"
+                        >
+                        <span id="systolic-help" class="form-field__help">mmHg (50〜250)</span>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="diastolic" class="form-field__label">最低血圧</label>
+                        <input 
+                            type="number" 
+                            id="diastolic" 
+                            name="diastolic" 
+                            class="form-field__input" 
+                            min="30" 
+                            max="150" 
+                            step="1"
+                            inputmode="numeric"
+                            placeholder="30〜150"
+                            required
+                            aria-describedby="diastolic-help"
+                        >
+                        <span id="diastolic-help" class="form-field__help">mmHg (30〜150)</span>
+                    </div>
+                </div>
+
+                <!-- 脈拍 -->
+                <div class="form-field">
+                    <label for="pulse" class="form-field__label">脈拍</label>
+                    <input 
+                        type="number" 
+                        id="pulse" 
+                        name="pulse" 
+                        class="form-field__input" 
+                        min="40" 
+                        max="200" 
+                        step="1"
+                        inputmode="numeric"
+                        placeholder="40〜200"
+                        required
+                        aria-describedby="pulse-help"
+                    >
+                    <span id="pulse-help" class="form-field__help">bpm (40〜200)</span>
+                </div>
+
+                <!-- 測定日時 -->
+                <div class="form-field">
+                    <label for="measuredAt" class="form-field__label">測定日時</label>
+                    <input 
+                        type="datetime-local" 
+                        id="measuredAt" 
+                        name="measuredAt" 
+                        class="form-field__input" 
+                        required
+                        aria-describedby="measuredAt-help"
+                    >
+                    <span id="measuredAt-help" class="form-field__help">日付と時刻を選択</span>
+                </div>
+
+                <!-- ボタン -->
+                <div class="form-actions">
+                    <button type="submit" id="btnSubmit" class="btn btn--primary">記録する</button>
+                    <button type="button" id="btnClear" class="btn btn--secondary">クリア</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- グラフセクション -->
+        <section class="chart-section">
+            <h2 class="chart-section__title">血圧推移グラフ（過去7日分）</h2>
+            
+            <!-- グラフ用フィルター -->
+            <div class="chart-filter">
+                <div class="form-field">
+                    <label for="chartMemberFilter" class="form-field__label">表示対象</label>
+                    <select id="chartMemberFilter" name="chartMemberFilter" class="form-field__input">
+                        <option value="all">全メンバー</option>
+                        <option value="自分">自分</option>
+                        <option value="配偶者">配偶者</option>
+                        <option value="父">父</option>
+                        <option value="母">母</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- グラフ表示領域 -->
+            <div id="chartContainer" class="chart-container">
+                <canvas id="bpChart"></canvas>
+            </div>
+            
+            <!-- 空表示メッセージ -->
+            <div id="emptyChartMessage" class="chart-empty" style="display: none;">
+                <p>過去7日分の記録がありません</p>
+                <p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>
+            </div>
+        </section>
+
+        <!-- 記録一覧セクション -->
+        <section class="records-section">
+            <div class="records-section__header">
+                <h2 class="records-section__title">記録一覧</h2>
+                <button type="button" id="btnResync" class="btn btn--secondary btn--small" style="display: none;">
+                    未同期を再送 <span id="unsyncedCount"></span>
+                </button>
+            </div>
+            
+            <!-- フィルタ・件数表示 -->
+            <div class="records-filter">
+                <div class="form-field">
+                    <label for="filterMember" class="form-field__label">表示対象</label>
+                    <select id="filterMember" name="filterMember" class="form-field__input">
+                        <option value="">全員</option>
+                        <option value="自分">自分</option>
+                        <option value="配偶者">配偶者</option>
+                        <option value="父">父</option>
+                        <option value="母">母</option>
+                    </select>
+                </div>
+                <div id="recordCount" class="records-count" aria-live="polite">
+                    表示: 0件
+                </div>
+            </div>
+
+            <!-- 一覧コンテナ -->
+            <div id="recordListContainer">
+                <!-- 空状態 -->
+                <div id="recordListEmpty" class="records-empty">
+                    <p>まだ記録がありません</p>
+                    <p class="records-empty__hint">上のフォームから血圧を記録しましょう</p>
+                </div>
+                
+                <!-- 一覧描画先 -->
+                <div id="recordList" class="records-list" style="display: none;"></div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

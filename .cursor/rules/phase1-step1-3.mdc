@@ -1,0 +1,188 @@
+```md
+# ProjectRules.md
+
+## 1. 目的とスコープ
+- 目的：血圧入力フォームで入力した記録を、オフラインでも保持できるように **localStorage へ安全に保存・読み込み** できる基盤を作る。
+- スコープ（やること）：
+  - 入力 → バリデーション → レコード生成 → 永続化（localStorage）
+  - 起動時に保存済みデータを読み込み、アプリ内状態（records）へ復元
+  - クリア操作（フォームリセット＋測定日時を「現在」に戻す）
+  - 異常系（localStorage 不可／JSON 破損／容量超過）でアプリが停止しないようにする
+  - 手動テスト観点（チェックリスト）を残す
+- 非スコープ（今はやらない）：
+  - クラウド同期（Google Sheets 等）・サーバ連携
+  - 一覧表示/グラフなどのUI機能追加（※後続フェーズで利用する前提のデータ基盤は作る）
+  - フレームワーク導入（React/Vue 等）
+
+## 2. 技術スタック
+- 基本：HTML / CSS / JavaScript
+- JavaScript方針：
+  - 外部FWなし（Vanilla JS）
+  - DOM操作とデータロジックを分離
+  - 例外は握りつぶさず、ユーザーに分かる形で通知
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル（最低限）：
+  - `index.html`：フォーム要素（member / systolic / diastolic / pulse / datetime）とボタン（記録する／クリア）
+  - `css/style.css`：メッセージ表示（成功/失敗/警告）などのスタイル
+  - `js/app.js`：保存・読み込み・クリア・バリデーション・ストレージアクセサ
+- 読み込み順：HTML → CSS → JS（`js/app.js` は `defer` 推奨）
+- セレクタ方針：
+  - 参照するDOMは **安定した `id`** を必須とする（揺れ防止）
+  - TODO: フォームの実DOM `id/name` が未確定の場合、`index.html` 側で固定する
+
+## 4. コーディング規約（横断）
+- 命名：
+  - JS：lowerCamelCase（例：`loadRecords`, `saveRecords`, `showMessage`）
+  - CSS：BEM（`block__elem--mod`）
+- コメント：原則日本語。関数の「入力・出力・副作用」を先頭1行で書く。
+- 分離：
+  - **定数/設定**（キー名・バリデーション範囲）
+  - **ドメインロジック**（レコード生成・検証）
+  - **I/O**（localStorage・DOM）
+  - **UI更新**（メッセージ表示）
+- 魔法数禁止：数値は `const` として一箇所に集約。
+
+## 5. 実装ルール（プロジェクト固有）
+
+### 5.1 保存データスキーマ（v1）
+- ストレージキー：`bp_records_v1`
+- レコード（1件）の必須フィールド（v1）：
+  - `id: string`（例：`String(Date.now())` など、衝突しないこと）
+  - `schemaVersion: 1`
+  - `member: string`
+  - `systolic: number`
+  - `diastolic: number`
+  - `pulse: number`
+  - `datetimeLocal: string`（`<input type="datetime-local">` の値：`YYYY-MM-DDTHH:mm`）
+  - `measuredAt: number`（epoch(ms)。`datetimeLocal` をローカル時刻として解釈した結果）
+  - （任意）`datetimeIso: string`（`new Date(measuredAt).toISOString()`。エクスポート用）
+- 配列として保存：`BpRecord[]` を JSON 文字列化して `localStorage.setItem(KEY, json)`
+- ソート方針：表示・利用時は `measuredAt` 降順（新しい順）
+
+### 5.2 バリデーション（保存前に必ず実施）
+- 必須：`member / systolic / diastolic / pulse / datetimeLocal`
+- 数値範囲：
+  - `systolic`：50〜250
+  - `diastolic`：30〜150
+  - `pulse`：40〜200
+- 整合性：`systolic > diastolic` を満たすこと
+- 型保証：保存する値は必ず number（`Number(...)` で変換し `Number.isFinite` を通す）
+- エラー表示：
+  - 何がNGか（必須不足/範囲外/整合性違反）を **1〜複数行** で提示
+  - フォーカス移動（可能なら最初の不正項目へ `focus()`）
+
+### 5.3 localStorage アクセサ（安全な get/set）
+- `isStorageAvailable()`：読み書きが例外なくできるかを判定（プライベートモード等を考慮）
+- `loadRecords()`：
+  - キー未存在 → `[]`
+  - JSON parse 失敗 → `[]` にフォールバック（任意で破損文字列を退避：`bp_records_v1__corrupt__<timestamp>`）
+  - 配列以外 → `[]`
+  - 返り値は常に配列（`BpRecord[]`）
+- `saveRecords(records)`：
+  - stringify → setItem
+  - `QuotaExceededError` 等の例外捕捉 → 保存を中断し、ユーザーに「容量不足」を通知
+- フォールバック方針：
+  - localStorage 不可のときもアプリが停止しない（最低限：メモリ上の `records` は動かし、保存は失敗通知）
+
+### 5.4 保存フロー（入力 → 保存）
+- submit/click を捕捉し `preventDefault()`（意図しないリロード防止）
+- 取得 → 変換 → バリデーション → レコード生成 → `records = loadRecords()` → `records.push(record)` → `saveRecords(records)`
+- 二重送信防止：保存処理中は送信ボタンを一時無効化（finallyで戻す）
+- 保存成功時：
+  - 成功メッセージを表示
+  - （必要なら）フォームの一部をリセット（※「クリア」と混同しない）
+
+### 5.5 起動時読み込み（初期化）
+- `DOMContentLoaded` で `records = loadRecords()`
+- データがなくてもエラーにしない（初回利用OK）
+
+### 5.6 クリア処理（フォームリセット＋日時リセット）
+- クリアボタンは `type="button"` を推奨（submit誤爆防止）
+- `form.reset()` の後、`datetime-local` を「現在」に設定し直す
+  - 形式：`YYYY-MM-DDTHH:mm`（秒は付けない）
+- クリア時にエラー表示/メッセージも消す（表示領域がある場合）
+
+## 6. UI/UX・入力操作の規約
+- 入力要素（最低限）：
+  - member（選択 or テキスト）
+  - systolic / diastolic / pulse（数値入力）
+  - datetime（`datetime-local`）
+- メッセージ表示：
+  - 原則：画面内のメッセージ領域（例：`#message`）に表示
+  - どうしても領域が無い場合の暫定：`alert()`（ただし常用しない）
+- 表示ルール：
+  - 成功：緑系（`--success`）／失敗：赤系（`--error`）／警告：黄系（`--warn`）
+  - 連続操作で上書きされること（古いメッセージを残さない）
+- 推奨API：`showMessage(type, text)`（UI方式を後でトーストに変えても呼び出しを変えずに済むようにする）
+
+## 7. パフォーマンス/品質
+- localStorage は同期APIのため、
+  - 大量データ前提の重い処理をしない（本フェーズは数十〜数百件想定）
+  - stringify/parse は必要回数を最小化
+- 例外時でも操作不能にしない（必ずUIで理由を伝える）
+- デバッグログ：開発中のみ（フラグでON/OFF）
+
+## 8. テスト/デバッグ（DoD）
+
+### 8.1 受け入れ（Doneの定義）
+- 入力したデータが `bp_records_v1` に **配列として保存** され、リロード後も復元できる
+- 必須・範囲・整合性のバリデーションが機能し、エラーがユーザーに分かる形で表示される
+- localStorage が使えない／壊れている／容量超過でも例外で停止せず、フォールバックまたは明確なエラー表示ができる
+- クリアでフォームがリセットされ、測定日時は「現在」に戻る
+
+### 8.2 手動テストチェックリスト
+- 正常系：
+  - 代表値（例：120/80/70）で保存 → Applicationタブで `bp_records_v1` に追加されている
+  - 3件以上保存 → リロード → 件数が維持される
+  - 複数 member で保存できる
+- 必須抜け：member未入力／日時未入力 → 保存されずエラー
+- 範囲外：
+  - systolic=49（NG）/ 250（OK）/ 251（NG）
+  - diastolic=29（NG）/ 150（OK）/ 151（NG）
+  - pulse=39（NG）/ 200（OK）/ 201（NG）
+- 整合性：systolic=80, diastolic=90 → 保存されずエラー
+- クリア：値入力 → クリア → 全項目が初期化、日時が現在に更新
+- 破損データ：
+  - localStorage に不正JSONを手で投入 → 起動しても落ちず `[]` 扱いになる
+- 容量超過（可能なら）：大量データ投入 → 保存失敗時のメッセージが出る
+
+## 9. リリース/更新運用
+- Plan/todo更新時：
+  - スキーマ変更（フィールド追加・キー変更）／バリデーション数値／UI要素ID の変更は **本ルールへ必ず反映**
+  - スキーマを変える場合は `schemaVersion` を上げ、移行方針（旧データの扱い）を追記
+- 変更の残し方：
+  - PR/コミットに「何が変わったか」「手動テスト結果」を短く書く
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部フレームワーク導入（React/Vue 等）
+- localStorage へ **未検証の生入力** をそのまま保存する（必ず型変換＋バリデーション）
+- 例外を握りつぶして無言で失敗する（ユーザー通知必須）
+- DOM取得を散在させる（起動時にまとめて参照し、欠落は早期に検知）
+- 魔法数の散在（キー名・範囲・メッセージは定数化）
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（例：`storage accessor追加`、`validation追加`、`clear処理追加`）
+- メッセージは日本語で「要点 → 効果 → 影響範囲」
+
+---
+
+## 付録A：実装メモ（推奨関数一覧）
+- `isStorageAvailable()`
+- `loadRecords()` / `saveRecords(records)`
+- `validateForm(values) -> { ok: boolean, errors: string[] }`
+- `buildRecord(values) -> BpRecord`
+- `setDatetimeNow(inputEl)`（`datetime-local` へ現在時刻をセット）
+- `showMessage(type, text)` / `clearMessage()`
+```
+
+```md
+# 生成ログ（短い要約）
+- localStorage 永続化（キー：`bp_records_v1`）と、起動時復元・クリア処理をProject Rules化。
+- 保存スキーマ（v1）：member / systolic / diastolic / pulse / datetimeLocal / measuredAt / id / schemaVersion を必須化。
+- バリデーション数値（50-250 / 30-150 / 40-200）と `systolic > diastolic` を明文化。
+- 異常系：storage不可・JSON破損・容量超過は try/catch で停止回避＋ユーザー通知。
+- UI通知は `showMessage(type, text)` を推奨（表示領域が無ければ暫定 alert）。
+- TODO: 実DOMの `id/name` とメッセージ表示領域（`#message` 等）を `index.html` 側で確定・固定する。
+```
+
