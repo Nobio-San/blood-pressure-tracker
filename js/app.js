@@ -11,6 +11,7 @@ const SCHEMA_VERSION = 1;
 const MAX_LIST_COUNT = 10; // 一覧の最大表示件数
 const SYNC_RETRY_INTERVAL_MS = 300; // 再同期時の送信間隔（ミリ秒）
 const CHART_DAYS = 7; // グラフで表示する日数（過去N日）
+const MAX_DATA_RETENTION_DAYS = 365; // データ保持期間（日数）
 
 // バリデーション範囲
 const VALIDATION = {
@@ -41,6 +42,14 @@ function init() {
     // localStorage から保存済みデータを読み込み
     records = loadRecords();
     console.log(`保存済みレコード数: ${records.length}`);
+    
+    // 1年より前のデータを自動削除
+    const cleanupResult = cleanupOldRecords(records);
+    if (cleanupResult.deletedCount > 0) {
+        console.log(`1年より前のデータを削除しました: ${cleanupResult.deletedCount}件`);
+        records = cleanupResult.filteredRecords;
+        saveRecords(records);
+    }
     
     // DOM要素の取得
     const form = document.getElementById('recordForm');
@@ -199,6 +208,31 @@ function saveRecords(records) {
         
         return false;
     }
+}
+
+/**
+ * 1年より前のデータを削除
+ * @param {Array} records - BpRecord[]
+ * @returns {Object} { filteredRecords: Array, deletedCount: number }
+ */
+function cleanupOldRecords(records) {
+    // 1年前の日時を計算（現在時刻から365日前）
+    const oneYearAgo = new Date();
+    oneYearAgo.setDate(oneYearAgo.getDate() - MAX_DATA_RETENTION_DAYS);
+    const oneYearAgoTime = oneYearAgo.getTime();
+    
+    // 1年以内のデータのみを残す
+    const filteredRecords = records.filter(record => {
+        if (!record.measuredAt) return true; // measuredAtがない場合は保持
+        return record.measuredAt >= oneYearAgoTime;
+    });
+    
+    const deletedCount = records.length - filteredRecords.length;
+    
+    return {
+        filteredRecords,
+        deletedCount
+    };
 }
 
 /* =========================================
