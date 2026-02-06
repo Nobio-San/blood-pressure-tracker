@@ -161,7 +161,7 @@
 
         <!-- グラフセクション -->
         <section class="chart-section">
-            <h2 class="chart-section__title">血圧推移グラフ（過去7日分）</h2>
+            <h2 class="chart-section__title">血圧推移グラフ</h2>
             
             <!-- グラフ用フィルター -->
             <div class="chart-filter">
@@ -174,6 +174,31 @@
                         <option value="父">父</option>
                         <option value="母">母</option>
                     </select>
+                </div>
+                
+                <!-- 期間選択 -->
+                <div class="form-field">
+                    <label for="chartStartDate" class="form-field__label">開始日</label>
+                    <input 
+                        type="date" 
+                        id="chartStartDate" 
+                        name="chartStartDate" 
+                        class="form-field__input"
+                        aria-describedby="chartStartDate-help"
+                    >
+                    <span id="chartStartDate-help" class="form-field__help">グラフ表示の開始日</span>
+                </div>
+                
+                <div class="form-field">
+                    <label for="chartEndDate" class="form-field__label">終了日</label>
+                    <input 
+                        type="date" 
+                        id="chartEndDate" 
+                        name="chartEndDate" 
+                        class="form-field__input"
+                        aria-describedby="chartEndDate-help"
+                    >
+                    <span id="chartEndDate-help" class="form-field__help">グラフ表示の終了日</span>
                 </div>
             </div>
             

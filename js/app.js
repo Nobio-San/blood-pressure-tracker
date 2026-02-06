@@ -85,6 +85,17 @@ function init() {
         chartMemberFilter.addEventListener('change', refreshChart);
     }
     
+    // グラフ期間選択のイベント
+    const chartStartDate = document.getElementById('chartStartDate');
+    const chartEndDate = document.getElementById('chartEndDate');
+    if (chartStartDate && chartEndDate) {
+        chartStartDate.addEventListener('change', refreshChart);
+        chartEndDate.addEventListener('change', refreshChart);
+    }
+    
+    // グラフ期間の初期化（過去7日分をデフォルトとして設定）
+    initChartDateRange();
+    
     // オフライン検知の初期化
     initOfflineDetection();
     
@@ -947,25 +958,67 @@ function handleDelete(event) {
 }
 
 /* =========================================
-   Chart.js グラフ表示（過去7日分の血圧推移）
+   Chart.js グラフ表示（期間選択可能な血圧推移）
    ========================================= */
 
 /**
- * 過去7日分のレコードを抽出（今日を含む直近7日）
- * @param {Array} records - 全レコード配列
- * @returns {Array} 7日範囲内のレコード
+ * グラフ期間の初期化（過去7日分をデフォルトとして設定）
  */
-function extractLast7DaysRecords(records) {
-    // 今日の0:00を基準とする
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+function initChartDateRange() {
+    const chartStartDate = document.getElementById('chartStartDate');
+    const chartEndDate = document.getElementById('chartEndDate');
+    
+    if (!chartStartDate || !chartEndDate) return;
+    
+    // 今日の日付
+    const today = new Date();
+    const todayStr = formatToDateOnly(today);
+    
+    // 7日前の日付
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() - (CHART_DAYS - 1));
+    const startDateStr = formatToDateOnly(startDate);
+    
+    // 初期値を設定（空の場合のみ）
+    if (!chartStartDate.value) {
+        chartStartDate.value = startDateStr;
+    }
+    if (!chartEndDate.value) {
+        chartEndDate.value = todayStr;
+    }
+}
+
+/**
+ * Date オブジェクトを YYYY-MM-DD 形式に整形
+ * @param {Date} date - 変換する日付
+ * @returns {string} YYYY-MM-DD形式の文字列
+ */
+function formatToDateOnly(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * 指定期間のレコードを抽出
+ * @param {Array} records - 全レコード配列
+ * @param {string} startDateStr - 開始日（YYYY-MM-DD）
+ * @param {string} endDateStr - 終了日（YYYY-MM-DD）
+ * @returns {Array} 期間内のレコード
+ */
+function extractRecordsByDateRange(records, startDateStr, endDateStr) {
+    // 日付文字列をDateオブジェクトに変換（開始日は0:00、終了日は23:59:59）
+    const startDate = new Date(startDateStr);
+    startDate.setHours(0, 0, 0, 0);
+    
+    const endDate = new Date(endDateStr);
+    endDate.setHours(23, 59, 59, 999);
     
     return records.filter(record => {
         if (!record.datetimeIso) return false;
         const recordDate = new Date(record.datetimeIso);
-        return recordDate >= startDate && recordDate <= now;
+        return recordDate >= startDate && recordDate <= endDate;
     });
 }
 
@@ -1231,17 +1284,42 @@ function refreshChart() {
         filtered = allRecords.filter(r => r.member === memberFilter);
     }
     
-    // 過去7日分を抽出
-    const last7Days = extractLast7DaysRecords(filtered);
+    // 期間選択の値を取得
+    const chartStartDate = document.getElementById('chartStartDate');
+    const chartEndDate = document.getElementById('chartEndDate');
+    
+    let dateRangeRecords = filtered;
+    
+    // 開始日と終了日が両方とも入力されている場合のみ期間フィルターを適用
+    if (chartStartDate && chartEndDate && chartStartDate.value && chartEndDate.value) {
+        const startDateStr = chartStartDate.value;
+        const endDateStr = chartEndDate.value;
+        
+        // 開始日が終了日より後の場合はエラーメッセージを表示
+        if (startDateStr > endDateStr) {
+            updateChartUIState(false);
+            const emptyMessage = document.getElementById('emptyChartMessage');
+            if (emptyMessage) {
+                emptyMessage.innerHTML = '<p>開始日は終了日より前に設定してください</p>';
+            }
+            return;
+        }
+        
+        dateRangeRecords = extractRecordsByDateRange(filtered, startDateStr, endDateStr);
+    }
     
     // データがない場合は空表示
-    if (last7Days.length === 0) {
+    if (dateRangeRecords.length === 0) {
         updateChartUIState(false);
+        const emptyMessage = document.getElementById('emptyChartMessage');
+        if (emptyMessage) {
+            emptyMessage.innerHTML = '<p>選択された期間の記録がありません</p><p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>';
+        }
         return;
     }
     
     // 日付ごとにグループ化して平均化
-    const grouped = groupAndAverageByDate(last7Days);
+    const grouped = groupAndAverageByDate(dateRangeRecords);
     
     // Chart.js用データに変換
     const chartData = buildChartData(grouped);
