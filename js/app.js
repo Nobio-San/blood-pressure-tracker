@@ -1583,7 +1583,7 @@ function initCamera() {
             }));
             
             // 一旦メッセージを表示（Step 2-2でプレビューに置き換え）
-            showMessage('撮影しました（Step 2-2でプレビュー機能を実装予定）', 'success');
+            showMessage('success', '撮影しました（Step 2-2でプレビュー機能を実装予定）');
             
             // カメラを閉じる
             stopCameraWithUI();
