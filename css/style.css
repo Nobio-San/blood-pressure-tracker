@@ -578,7 +578,7 @@ select.form-field__input {
     /* グラフフィルタを横並びに */
     .chart-filter {
         flex-direction: row;
-        align-items: center;
+        align-items: flex-start;
     }
 
     .chart-filter .form-field {
