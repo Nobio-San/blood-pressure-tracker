@@ -108,6 +108,9 @@ function init() {
     // オフライン検知の初期化
     initOfflineDetection();
     
+    // カメラ機能の初期化 (Phase 2 Step 2-1)
+    initCamera();
+    
     // 初期表示
     refreshRecordList();
     updateUnsyncedUI();
@@ -1405,5 +1408,227 @@ function updateOfflineUI() {
         // オフライン時はバナーを表示
         offlineBanner.classList.add('offline-banner--visible');
         console.log('[Offline] オフライン状態');
+    }
+}
+
+/* =========================================
+   カメラ機能 (Phase 2 Step 2-1)
+   ========================================= */
+
+/**
+ * カメラ機能の初期化
+ */
+function initCamera() {
+    const btnOpenCamera = document.getElementById('btnOpenCamera');
+    const btnCameraClose = document.getElementById('btnCameraClose');
+    const btnCameraCapture = document.getElementById('btnCameraCapture');
+    const cameraModal = document.getElementById('cameraModal');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const cameraCanvas = document.getElementById('cameraCanvas');
+    const cameraError = document.getElementById('cameraError');
+    const cameraLoading = document.getElementById('cameraLoading');
+    
+    if (!btnOpenCamera || !cameraModal || !cameraVideo || !cameraCanvas) {
+        console.warn('[Camera] 必要なDOM要素が見つかりません');
+        return;
+    }
+    
+    // カメラモジュールの確認
+    if (!window.CameraModule) {
+        console.error('[Camera] CameraModule が読み込まれていません');
+        return;
+    }
+    
+    const { startCamera, stopCamera, capturePhoto } = window.CameraModule;
+    
+    // カメラで撮影ボタン
+    btnOpenCamera.addEventListener('click', async () => {
+        console.log('[Camera] カメラモーダルを開く');
+        showCameraModal();
+        await startCameraWithUI();
+    });
+    
+    // 閉じるボタン
+    btnCameraClose.addEventListener('click', () => {
+        console.log('[Camera] カメラモーダルを閉じる');
+        stopCameraWithUI();
+        hideCameraModal();
+    });
+    
+    // シャッターボタン
+    btnCameraCapture.addEventListener('click', async () => {
+        await capturePhotoWithUI();
+    });
+    
+    // モーダル背景クリックで閉じる
+    cameraModal.addEventListener('click', (e) => {
+        if (e.target === cameraModal) {
+            console.log('[Camera] モーダル背景クリックで閉じる');
+            stopCameraWithUI();
+            hideCameraModal();
+        }
+    });
+    
+    // ページ非表示時にカメラを停止（掴みっぱなし防止）
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && cameraModal.style.display !== 'none') {
+            console.log('[Camera] ページ非表示のためカメラを停止');
+            stopCameraWithUI();
+        }
+    });
+    
+    window.addEventListener('pagehide', () => {
+        console.log('[Camera] pagehideイベントでカメラを停止');
+        stopCameraWithUI();
+    });
+    
+    // Escキーで閉じる
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && cameraModal.style.display !== 'none') {
+            console.log('[Camera] Escキーでカメラを閉じる');
+            stopCameraWithUI();
+            hideCameraModal();
+        }
+    });
+    
+    console.log('[Camera] カメラ機能を初期化しました');
+    
+    /**
+     * カメラモーダルを表示
+     */
+    function showCameraModal() {
+        cameraModal.style.display = 'flex';
+        cameraError.style.display = 'none';
+        cameraError.textContent = '';
+        btnCameraClose.focus(); // 初期フォーカスを閉じるボタンへ
+    }
+    
+    /**
+     * カメラモーダルを非表示
+     */
+    function hideCameraModal() {
+        cameraModal.style.display = 'none';
+        cameraLoading.style.display = 'none';
+        cameraError.style.display = 'none';
+        btnOpenCamera.focus(); // フォーカスを戻す
+    }
+    
+    /**
+     * カメラを起動してUIを更新
+     */
+    async function startCameraWithUI() {
+        // ローディング表示
+        cameraLoading.style.display = 'flex';
+        cameraError.style.display = 'none';
+        btnCameraCapture.disabled = true;
+        
+        try {
+            const result = await startCamera({ videoEl: cameraVideo });
+            
+            if (result.ok) {
+                console.log('[Camera] カメラ起動成功');
+                cameraLoading.style.display = 'none';
+                
+                // videoがreadyになるまで待つ
+                await waitForVideoReady(cameraVideo);
+                
+                btnCameraCapture.disabled = false;
+            } else {
+                console.error('[Camera] カメラ起動失敗', result.error);
+                cameraLoading.style.display = 'none';
+                showError(result.error);
+                btnCameraCapture.disabled = true;
+            }
+        } catch (err) {
+            console.error('[Camera] カメラ起動中に例外', err);
+            cameraLoading.style.display = 'none';
+            showError({
+                code: 'UNKNOWN',
+                message: `エラーが発生しました: ${err.message}`
+            });
+            btnCameraCapture.disabled = true;
+        }
+    }
+    
+    /**
+     * カメラを停止
+     */
+    function stopCameraWithUI() {
+        stopCamera();
+        btnCameraCapture.disabled = true;
+    }
+    
+    /**
+     * 静止画をキャプチャしてイベント通知
+     */
+    async function capturePhotoWithUI() {
+        console.log('[Camera] 静止画をキャプチャ');
+        
+        // 連打防止
+        btnCameraCapture.disabled = true;
+        const originalText = btnCameraCapture.textContent;
+        btnCameraCapture.textContent = '📸 撮影中...';
+        
+        try {
+            const result = await capturePhoto({
+                videoEl: cameraVideo,
+                canvasEl: cameraCanvas
+            });
+            
+            console.log('[Camera] キャプチャ成功', result);
+            
+            // CustomEventで通知（Step 2-2以降で利用）
+            document.dispatchEvent(new CustomEvent('camera:captured', {
+                detail: result
+            }));
+            
+            // 一旦メッセージを表示（Step 2-2でプレビューに置き換え）
+            showMessage('撮影しました（Step 2-2でプレビュー機能を実装予定）', 'success');
+            
+            // カメラを閉じる
+            stopCameraWithUI();
+            hideCameraModal();
+            
+        } catch (err) {
+            console.error('[Camera] キャプチャ失敗', err);
+            showError({
+                code: 'CAPTURE_ERROR',
+                message: `撮影に失敗しました: ${err.message}`
+            });
+        } finally {
+            btnCameraCapture.textContent = originalText;
+            btnCameraCapture.disabled = false;
+        }
+    }
+    
+    /**
+     * エラーを表示
+     */
+    function showError(error) {
+        cameraError.innerHTML = `<strong>エラー: ${error.code}</strong>${error.message}`;
+        cameraError.style.display = 'block';
+    }
+    
+    /**
+     * video要素が準備完了するまで待機
+     */
+    function waitForVideoReady(videoEl) {
+        return new Promise((resolve) => {
+            if (videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+                resolve();
+                return;
+            }
+            
+            const onReady = () => {
+                if (videoEl.videoWidth > 0) {
+                    videoEl.removeEventListener('loadedmetadata', onReady);
+                    videoEl.removeEventListener('canplay', onReady);
+                    resolve();
+                }
+            };
+            
+            videoEl.addEventListener('loadedmetadata', onReady);
+            videoEl.addEventListener('canplay', onReady);
+        });
     }
 }

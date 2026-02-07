@@ -17,6 +17,7 @@
     <!-- Chart.js 4.x CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="js/sheets-api.js" defer></script>
+    <script src="js/camera.js" defer></script>
     <script src="js/app.js" defer></script>
     
     <!-- Service Worker登録 -->
@@ -64,6 +65,12 @@
     <main id="app">
         <section class="form-section">
             <h2 class="form-section__title">血圧を記録する</h2>
+            <!-- カメラで撮影ボタン -->
+            <div class="camera-trigger">
+                <button type="button" id="btnOpenCamera" class="btn btn--camera" aria-label="カメラで血圧計の画面を撮影">
+                    📷 カメラで撮影
+                </button>
+            </div>
             <!-- メッセージ表示領域 -->
             <div id="message" class="message" role="status" aria-live="polite"></div>
             <form id="recordForm" class="record-form" novalidate>
@@ -253,5 +260,38 @@
             </div>
         </section>
     </main>
+
+    <!-- カメラモーダル -->
+    <div id="cameraModal" class="camera-modal" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle" style="display: none;">
+        <div class="camera-modal__overlay"></div>
+        <div class="camera-modal__content">
+            <h2 id="cameraModalTitle" class="camera-modal__title">カメラで撮影</h2>
+            
+            <!-- プレビュー領域 -->
+            <div class="camera-modal__preview">
+                <video id="cameraVideo" class="camera-modal__video" playsinline autoplay muted aria-label="カメラプレビュー"></video>
+                <canvas id="cameraCanvas" class="camera-modal__canvas" style="display: none;" aria-hidden="true"></canvas>
+            </div>
+            
+            <!-- エラー/注意表示領域 -->
+            <div id="cameraError" class="camera-modal__error" role="alert" aria-live="assertive" style="display: none;"></div>
+            
+            <!-- ローディング表示 -->
+            <div id="cameraLoading" class="camera-modal__loading" style="display: none;">
+                <span class="camera-modal__loading-spinner"></span>
+                <span>カメラを起動中...</span>
+            </div>
+            
+            <!-- 操作ボタン -->
+            <div class="camera-modal__actions">
+                <button type="button" id="btnCameraCapture" class="btn btn--primary btn--large" aria-label="シャッターを切って撮影">
+                    📸 シャッター
+                </button>
+                <button type="button" id="btnCameraClose" class="btn btn--secondary btn--large" aria-label="カメラを閉じる">
+                    ✕ 閉じる
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

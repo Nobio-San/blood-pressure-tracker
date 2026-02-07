@@ -597,3 +597,194 @@ select.form-field__input {
         padding: 2.5rem;
     }
 }
+
+/* =========================================
+   カメラ機能スタイル (Phase 2 Step 2-1)
+   ========================================= */
+
+/* カメラ撮影トリガーボタン */
+.camera-trigger {
+    margin-bottom: 1.5rem;
+}
+
+.btn--camera {
+    width: 100%;
+    background-color: #6c63ff;
+    color: white;
+    font-size: 1rem;
+    padding: 0.875rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(108, 99, 255, 0.3);
+}
+
+.btn--camera:hover {
+    background-color: #5a52d5;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(108, 99, 255, 0.4);
+}
+
+.btn--camera:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(108, 99, 255, 0.3);
+}
+
+.btn--camera:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+/* カメラモーダル */
+.camera-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.camera-modal__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.85);
+}
+
+.camera-modal__content {
+    position: relative;
+    width: 90%;
+    max-width: 640px;
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    z-index: 2001;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.camera-modal__title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+/* プレビュー領域 */
+.camera-modal__preview {
+    position: relative;
+    width: 100%;
+    background-color: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.camera-modal__video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.camera-modal__canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* エラー表示 */
+.camera-modal__error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.camera-modal__error strong {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+}
+
+/* ローディング表示 */
+.camera-modal__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    color: #666;
+    font-size: 0.875rem;
+}
+
+.camera-modal__loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e0e0e0;
+    border-top-color: #4a90e2;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 操作ボタン */
+.camera-modal__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.btn--large {
+    flex: 1;
+    min-height: 52px;
+    font-size: 1rem;
+    padding: 0.875rem 1.25rem;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 480px) {
+    .camera-modal__content {
+        width: 95%;
+        padding: 1rem;
+    }
+    
+    .camera-modal__title {
+        font-size: 1.125rem;
+    }
+    
+    .camera-modal__actions {
+        flex-direction: column;
+    }
+    
+    .btn--large {
+        width: 100%;
+    }
+}

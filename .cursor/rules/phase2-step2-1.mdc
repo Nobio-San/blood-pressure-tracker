@@ -1,0 +1,167 @@
+```md
+# ProjectRules.md（Cursor Project Rules 貼り付け用）
+
+## 1. 目的とスコープ
+- 目的: PWA（主にAndroid Chrome）上でスマホカメラへアクセスし、モーダル内でプレビュー表示し、静止画をcanvas経由で取得（Blob推奨）できるようにする（Phase2 / Step2-1）。
+- スコープ（含む）:
+  - 「カメラで撮影」ボタン → モーダル表示 → カメラ起動（getUserMedia） → プレビュー（video）
+  - 「シャッター」で静止画キャプチャ（video→canvas→画像データ生成）
+  - 「閉じる」でストリーム停止・解放（track.stop / srcObjectクリア）
+  - エラーハンドリング（権限拒否/非対応/HTTP/端末制約などの分類と表示）
+  - 最小の手動テスト設計（端末差・例外系の洗い出し）
+- 非スコープ（含まない）:
+  - 撮影画像の高度なプレビュー/編集（再撮影・採用・圧縮・向き補正・EXIF等）※Step2-2以降
+  - 画像の永続保存（サーバ送信/IndexedDB/ファイル保存）
+  - デバイス一覧UI（enumerateDevicesによるカメラ切替）※将来拡張
+
+## 2. 技術スタック
+- 使用言語: HTML / CSS / JavaScript
+- 対象環境: PWA（Android） / Android Chrome を主対象
+- 主要API:
+  - `navigator.mediaDevices.getUserMedia()`
+  - `<video>`（`playsinline` / `autoplay` / `muted`）
+  - `<canvas>` / `CanvasRenderingContext2D.drawImage()`
+- 前提:
+  - セキュアコンテキスト（HTTPS または localhost）必須
+  - ユーザー操作（クリック等）を起点にカメラ起動する
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル:
+  - `index.html` : 「カメラで撮影」ボタン、モーダル、`video`/`canvas`/操作ボタン/エラー表示領域
+  - `css/style.css` : モーダル/ボタン/プレビューのレスポンシブスタイル
+  - `js/camera.js` : カメラ制御モジュール（起動/停止/キャプチャ/エラー分類）
+  - `js/app.js` : UI配線（モーダル開閉、ボタン無効化、メッセージ表示、イベント受信）
+- DOMのID/クラスは先に固定し、`camera.js` は「DOM参照を受け取って制御」する（直DOM探索の乱用禁止）。
+- 既存構成優先:
+  - 既存が `type="module"` でない場合は、まず既存と同じ読み込み形式で実装（破壊的変更を避ける）。
+  - ES Modulesへ移行する場合は、`app.js`/`camera.js` を同時に `type="module"` に統一し、import/exportで接続する（TODO: 既存構成確認）。
+
+## 4. コーディング規約（横断）
+- 命名:
+  - JS: lowerCamelCase（例: `startCamera`, `stopCamera`, `capturePhoto`）
+  - CSS: BEM（`cameraModal__video` など）またはUtilityのどちらかに統一（本プロジェクトはBEM推奨）
+- コメント: 原則日本語。関数の「入出力・副作用・例外」を冒頭1〜2行で明記。
+- 構造: 設定/定数・ドメインロジック・I/O（API）・UI更新を分離。
+- 依存: グローバル共有は最小化。状態（stream等）は `camera.js` 内部に閉じる。
+- 魔法数禁止: UIサイズ・最大解像度などの数値は `camera.js` 冒頭の定数に集約（Step2-1ではファイル内定数でOK）。
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 カメラ起動（startCamera）
+- 起動条件:
+  - `window.isSecureContext` を確認し、NGならユーザー向けに「HTTPS/localhostで開く」案内を返す。
+  - 必ずユーザー操作（ボタン押下）から呼ぶ（ページロード直後の自動起動は禁止）。
+- constraints:
+  - まず `facingMode: { ideal: 'environment' }`（背面優先）で試す。
+  - `OverconstrainedError` 等で失敗した場合は、より汎用なconstraints（例: `video: true`）で再試行する。
+- `video`設定:
+  - `videoEl.srcObject = stream` → `await videoEl.play()`
+  - `autoplay` / `playsinline` / `muted` を付与（自動再生制約回避）
+- キャプチャ可能になるタイミング:
+  - `loadedmetadata` もしくは `canplay` を待ち、`videoEl.videoWidth/videoHeight > 0` を確認してからシャッターを有効化。
+
+### 5.2 カメラ停止（stopCamera）
+- `stream.getTracks().forEach(t => t.stop())` を必ず実行。
+- `videoEl.srcObject = null` で参照を切る。
+- モーダルを閉じる操作、`visibilitychange`（hidden）、`pagehide` でも `stopCamera()` を呼ぶ（掴みっぱなし防止）。
+
+### 5.3 キャプチャ（capturePhoto）
+- 基本:
+  - `canvas.width = videoEl.videoWidth` / `canvas.height = videoEl.videoHeight`
+  - `ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)`
+- 返却形式（統一）:
+  - `Blob` を標準（`canvas.toBlob()`）
+  - 必要に応じて `URL.createObjectURL(blob)` を生成してアプリ側へ渡す（Step2-1ではデバッグ/仮表示用途まで）。
+- サイズ制御（最小）:
+  - `MAX_CAPTURE_EDGE`（例: 1280）を超える場合は縮小してから `toBlob`（詳細最適化はStep2-2へ）。
+- 連打対策:
+  - キャプチャ中はシャッターボタンを無効化し、完了後に復帰。
+
+### 5.4 UIとの受け渡し
+- `camera.js` は「画像取得完了」を以下どちらかで通知（どちらかに統一）:
+  - A案: CustomEvent（推奨） `document.dispatchEvent(new CustomEvent('camera:captured', { detail: { blob, objectUrl, width, height } }))`
+  - B案: コールバック登録 `onCaptured(callback)`
+- Step2-1では「取得できたこと」の担保が目的。保存/表示/編集はStep2-2以降。
+
+### 5.5 エラー分類とユーザー向け表示
+- `startCamera()` の失敗はエラー種別を分類してUIに返す（例: `{ code, message }`）。
+  - `NotAllowedError`: 権限拒否 → ブラウザ設定で許可する手順を案内
+  - `NotFoundError`: カメラ未検出 → 端末/接続確認
+  - `NotReadableError`: 他アプリ占有/ハード故障など → 他アプリ終了/再起動案内
+  - `OverconstrainedError`: 背面指定など制約不一致 → 制約を緩めて再試行
+  - `TypeError` / `NotSupportedError`: API非対応 → 対応ブラウザ案内
+  - セキュアコンテキストNG: HTTPS/localhost案内
+- エラーは「原因 + 次にやること」が1画面で分かる文言にする。
+
+## 6. UI/UX・入力操作の規約
+- UI要素（最低限）:
+  - 起点ボタン: 「カメラで撮影」
+  - モーダル: プレビュー（video）、キャプチャ用canvas（非表示可）、シャッター、閉じる、エラー/注意表示領域
+- 操作性:
+  - ボタンはタップしやすく（目安: 高さ48px以上、十分な余白）。
+  - 起動中はローディング表示し、操作ボタンは適切に無効化。
+- アクセシビリティ（最小）:
+  - ボタンに `aria-label`、モーダルに `role="dialog"` と `aria-modal="true"` を付与。
+  - モーダル表示時は初期フォーカスを閉じるボタン等へ移動（フォーカス迷子を防ぐ）。
+  - （任意）Escキーで閉じる・背景クリックで閉じるは「停止処理が必ず走る」ことを条件に実装。
+
+## 7. パフォーマンス/品質
+- カメラは必要な時だけ起動し、モーダルを閉じたら必ず停止する（電池/発熱対策）。
+- `getUserMedia` の呼び出し回数を最小化（起動中の二重起動は禁止）。
+- 画像処理はStep2-1では最小限（縮小は上限のみ）。重い処理はUIスレッドを塞がないように分割（将来）。
+- ログ:
+  - 開始/停止/例外種別は最低限出すが、本番ではフラグで抑制できる形にする。
+
+## 8. テスト/デバッグ（DoD）
+- Done（受け入れ基準）:
+  - HTTPS（またはlocalhost）で「カメラで撮影」→プレビュー表示→「シャッター」で画像Blobを取得できる。
+  - 「閉じる」でストリームが停止し、カメラが解放される（他アプリで起動可能）。
+  - 権限拒否/非対応/HTTPアクセス時にユーザーへ分かるエラー表示が出る。
+- 手動テスト（最低限）:
+  - 環境: HTTPS / localhost / HTTP（HTTPはエラー案内が出ること）
+  - 権限: 初回許可 / 初回拒否 / 既に拒否状態 → 表示と復帰手順の案内
+  - 連続起動: start→stop→start が安定して動く
+  - アプリ切替: バックグラウンド→復帰でカメラが掴みっぱなしにならない（hidden/pagehideで停止）
+  - 画面回転: 縦横回転で操作不能にならない（最低限、閉じるが効く）
+- デバッグログ（例）:
+  - `camera:start`, `camera:started`, `camera:stop`, `camera:stopped`, `camera:error:<code>`
+
+## 9. リリース/更新運用
+- `todo/plan.md`（要件）更新時は、以下を本ルールへ差分反映する:
+  - UI要素（ボタン/モーダル構成/文言）
+  - 画像返却形式（Blob/DataURL）とイベント名/データ形
+  - 制約値（最大解像度など）
+- 変更は「Step番号（2-1/2-2...）」「影響ファイル」「動作確認観点」をコミットメッセージに含める。
+
+## 10. 禁止事項/アンチパターン
+- ページロード時の自動カメラ起動（ユーザー操作なし）
+- モーダルを閉じてもstreamを止めない（track.stop漏れ）
+- `setInterval` 乱用でUI更新を回す（必要ならイベント駆動）
+- 画像編集/向き補正/圧縮の過剰実装をStep2-1に持ち込む（Step2-2へ分離）
+- 例外を握り潰す（必ず分類してUIに返す）
+- 外部フレームワーク/ライブラリの無断導入（要件にない限り追加しない）
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（UIスケルトン / camera.js土台 / キャプチャ / UI配線 / テストメモ などで分割）。
+- PRには「Android実機での確認結果（端末/OS/ブラウザ）」を最低1つ添付。
+
+---
+
+### 付録A: 最小インターフェース（例）
+- `startCamera({ videoEl }) -> { ok: true } | { ok: false, error: { code, message } }`
+- `stopCamera() -> void`
+- `capturePhoto({ videoEl, canvasEl }) -> Promise<{ blob, objectUrl, width, height }>`
+
+TODO:
+- 既存プロジェクトの script構成（module有無）を確認し、読み込み方式を統一する。
+```
+
+```md
+# 生成ログ（要約）
+- 入力から抽出: PWA（Android）でのカメラ起動/停止/プレビュー/静止画キャプチャ（canvas取得）をStep2-1で実装。
+- 主要成果物: `js/camera.js`（起動/停止/キャプチャ/エラー分類）と、`index.html`のボタン+モーダルUI（video/canvas/シャッター/閉じる/エラー領域）。
+- 重要制約: HTTPS/localhost必須、ユーザー操作起点、背面優先は `facingMode: { ideal: 'environment' }`、失敗時は制約を緩めて再試行。
+- 安定性要件: 「閉じる」や `visibilitychange/pagehide` で必ず `stopCamera()` を呼び、track.stop漏れを防止。
+- 画像返却: Step2-1は取得できることを優先し、返却形式はBlobに統一（プレビュー/向き補正等はStep2-2へ）。
+- 未確定点（TODO化）: 本番ホスティングがHTTPS提供か、撮影ボタンの最終UI配置、既存のJS読み込み形式（module有無）。
+```
+
