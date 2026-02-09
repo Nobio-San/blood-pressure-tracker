@@ -1416,7 +1416,7 @@ function updateOfflineUI() {
    ========================================= */
 
 /**
- * カメラ機能の初期化
+ * カメラ功の初期化
  */
 function initCamera() {
     const btnOpenCamera = document.getElementById('btnOpenCamera');
@@ -1427,6 +1427,17 @@ function initCamera() {
     const cameraCanvas = document.getElementById('cameraCanvas');
     const cameraError = document.getElementById('cameraError');
     const cameraLoading = document.getElementById('cameraLoading');
+    const loadingText = document.getElementById('loadingText');
+    
+    // Phase 2 Step 2-2: プレビュー関連要素
+    const cameraPreviewContainer = document.getElementById('cameraPreviewContainer');
+    const photoPreviewContainer = document.getElementById('photoPreviewContainer');
+    const photoPreview = document.getElementById('photoPreview');
+    const cameraActions = document.getElementById('cameraActions');
+    const photoActions = document.getElementById('photoActions');
+    const btnRetake = document.getElementById('btnRetake');
+    const btnRotate = document.getElementById('btnRotate');
+    const btnUsePhoto = document.getElementById('btnUsePhoto');
     
     if (!btnOpenCamera || !cameraModal || !cameraVideo || !cameraCanvas) {
         console.warn('[Camera] 必要なDOM要素が見つかりません');
@@ -1439,7 +1450,7 @@ function initCamera() {
         return;
     }
     
-    const { startCamera, stopCamera, capturePhoto } = window.CameraModule;
+    const { startCamera, stopCamera, capturePhoto, processCapturedPhoto, retakePhoto, rotatePhoto, usePhoto, clearSessionStorage } = window.CameraModule;
     
     // カメラで撮影ボタン
     btnOpenCamera.addEventListener('click', async () => {
@@ -1459,6 +1470,66 @@ function initCamera() {
     btnCameraCapture.addEventListener('click', async () => {
         await capturePhotoWithUI();
     });
+    
+    // 再撮影ボタン (Phase 2 Step 2-2)
+    if (btnRetake) {
+        btnRetake.addEventListener('click', () => {
+            console.log('[Camera] 再撮影');
+            retakePhoto();
+            switchToCameraViewMode();
+        });
+    }
+    
+    // 回転ボタン (Phase 2 Step 2-2)
+    if (btnRotate) {
+        btnRotate.addEventListener('click', async () => {
+            console.log('[Camera] 画像を回転');
+            btnRotate.disabled = true;
+            const originalText = btnRotate.textContent;
+            btnRotate.textContent = '🔄 回転中...';
+            
+            try {
+                const result = await rotatePhoto({ previewImg: photoPreview });
+                
+                if (!result.ok) {
+                    showError({ code: 'ROTATE_ERROR', message: result.error });
+                }
+            } finally {
+                btnRotate.textContent = originalText;
+                btnRotate.disabled = false;
+            }
+        });
+    }
+    
+    // この画像を使うボタン (Phase 2 Step 2-2)
+    if (btnUsePhoto) {
+        btnUsePhoto.addEventListener('click', async () => {
+            console.log('[Camera] 画像を採用');
+            btnUsePhoto.disabled = true;
+            const originalText = btnUsePhoto.textContent;
+            btnUsePhoto.textContent = '✓ 保存中...';
+            
+            try {
+                const result = await usePhoto();
+                
+                if (result.ok) {
+                    showMessage('success', '画像を保存しました');
+                    console.log('[Camera] 画像をsessionStorageに保存成功');
+                    
+                    // TODO: Step 2-4で入力フォームへ反映する処理を追加
+                    
+                    // カメラを閉じる
+                    stopCameraWithUI();
+                    hideCameraModal();
+                } else {
+                    showError({ code: 'SAVE_ERROR', message: result.error });
+                }
+            } finally {
+                btnUsePhoto.textContent = originalText;
+                btnUsePhoto.disabled = false;
+            }
+        });
+    }
     
     // モーダル背景クリックで閉じる
     cameraModal.addEventListener('click', (e) => {
@@ -1500,6 +1571,7 @@ function initCamera() {
         cameraModal.style.display = 'flex';
         cameraError.style.display = 'none';
         cameraError.textContent = '';
+        switchToCameraViewMode(); // 初期はカメラプレビュー
         btnCameraClose.focus(); // 初期フォーカスを閉じるボタンへ
     }
     
@@ -1514,11 +1586,32 @@ function initCamera() {
     }
     
     /**
+     * カメラプレビュー表示モードに切り替え
+     */
+    function switchToCameraViewMode() {
+        if (cameraPreviewContainer) cameraPreviewContainer.style.display = 'flex';
+        if (photoPreviewContainer) photoPreviewContainer.style.display = 'none';
+        if (cameraActions) cameraActions.style.display = 'flex';
+        if (photoActions) photoActions.style.display = 'none';
+    }
+    
+    /**
+     * 写真プレビュー表示モードに切り替え
+     */
+    function switchToPhotoViewMode() {
+        if (cameraPreviewContainer) cameraPreviewContainer.style.display = 'none';
+        if (photoPreviewContainer) photoPreviewContainer.style.display = 'flex';
+        if (cameraActions) cameraActions.style.display = 'none';
+        if (photoActions) photoActions.style.display = 'flex';
+    }
+    
+    /**
      * カメラを起動してUIを更新
      */
     async function startCameraWithUI() {
         // ローディング表示
         cameraLoading.style.display = 'flex';
+        if (loadingText) loadingText.textContent = 'カメラを起動中...';
         cameraError.style.display = 'none';
         btnCameraCapture.disabled = true;
         
@@ -1559,7 +1652,7 @@ function initCamera() {
     }
     
     /**
-     * 静止画をキャプチャしてイベント通知
+     * 静止画をキャプチャしてプレビュー表示 (Phase 2 Step 2-2)
      */
     async function capturePhotoWithUI() {
         console.log('[Camera] 静止画をキャプチャ');
@@ -1569,28 +1662,44 @@ function initCamera() {
         const originalText = btnCameraCapture.textContent;
         btnCameraCapture.textContent = '📸 撮影中...';
         
+        // ローディング表示
+        cameraLoading.style.display = 'flex';
+        if (loadingText) loadingText.textContent = '画像を処理中...';
+        cameraError.style.display = 'none';
+        
         try {
-            const result = await capturePhoto({
+            // Step 1: 撮影
+            const captureResult = await capturePhoto({
                 videoEl: cameraVideo,
                 canvasEl: cameraCanvas
             });
             
-            console.log('[Camera] キャプチャ成功', result);
+            console.log('[Camera] キャプチャ成功', captureResult);
             
-            // CustomEventで通知（Step 2-2以降で利用）
-            document.dispatchEvent(new CustomEvent('camera:captured', {
-                detail: result
-            }));
+            // Step 2: 画像処理（縮小・圧縮・向き補正）
+            const processResult = await processCapturedPhoto({
+                capturedBlob: captureResult.blob,
+                previewImg: photoPreview
+            });
             
-            // 一旦メッセージを表示（Step 2-2でプレビューに置き換え）
-            showMessage('success', '撮影しました（Step 2-2でプレビュー機能を実装予定）');
+            cameraLoading.style.display = 'none';
             
-            // カメラを閉じる
-            stopCameraWithUI();
-            hideCameraModal();
+            if (processResult.ok) {
+                console.log('[Camera] 画像処理成功');
+                
+                // プレビュー表示モードに切り替え
+                switchToPhotoViewMode();
+            } else {
+                console.error('[Camera] 画像処理失敗', processResult.error);
+                showError({
+                    code: 'PROCESS_ERROR',
+                    message: processResult.error
+                });
+            }
             
         } catch (err) {
             console.error('[Camera] キャプチャ失敗', err);
+            cameraLoading.style.display = 'none';
             showError({
                 code: 'CAPTURE_ERROR',
                 message: `撮影に失敗しました: ${err.message}`

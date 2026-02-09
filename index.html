@@ -5,25 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>血圧記録アプリ</title>
     
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png">
+    
     <!-- PWA設定 -->
     <link rel="manifest" href="./manifest.json">
     <meta name="theme-color" content="#4a90e2">
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="血圧記録">
     
     <link rel="stylesheet" href="css/style.css">
     <!-- Chart.js 4.x CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="js/sheets-api.js?v=2" defer></script>
-    <script src="js/camera.js?v=2" defer></script>
-    <script src="js/app.js?v=2" defer></script>
+    <script src="js/sheets-api.js?v=3" defer></script>
+    <script src="js/camera.js?v=3" defer></script>
+    <script src="js/app.js?v=3" defer></script>
     
     <!-- Service Worker登録 -->
     <script>
         // Service Worker登録（PWAのオフライン機能を有効化）
-        if ('serviceWorker' in navigator) {
+        // 開発環境: 自己署名証明書の場合、Service Workerは正常に登録されないことがあります
+        // これは予想される動作であり、アプリ本体の機能には影響しません
+        if ('serviceWorker' in navigator && location.protocol === 'https:') {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./service-worker.js')
                     .then(registration => {
@@ -43,12 +49,15 @@
                         });
                     })
                     .catch(error => {
-                        console.error('[SW] 登録失敗:', error);
+                        console.warn('[SW] 登録失敗:', error.message || error);
+                        console.warn('[SW] 開発環境では自己署名証明書によりService Workerが登録されないことがあります');
                         // SW登録失敗してもアプリは継続動作
                     });
             });
         } else {
-            console.warn('[SW] このブラウザはService Workerに対応していません');
+            if (!('serviceWorker' in navigator)) {
+                console.warn('[SW] このブラウザはService Workerに対応していません');
+            }
         }
     </script>
 </head>
@@ -267,28 +276,46 @@
         <div class="camera-modal__content">
             <h2 id="cameraModalTitle" class="camera-modal__title">カメラで撮影</h2>
             
-            <!-- プレビュー領域 -->
-            <div class="camera-modal__preview">
+            <!-- カメラプレビュー領域 -->
+            <div id="cameraPreviewContainer" class="camera-modal__preview">
                 <video id="cameraVideo" class="camera-modal__video" playsinline autoplay muted aria-label="カメラプレビュー"></video>
                 <canvas id="cameraCanvas" class="camera-modal__canvas" style="display: none;" aria-hidden="true"></canvas>
+            </div>
+            
+            <!-- 撮影画像プレビュー領域 -->
+            <div id="photoPreviewContainer" class="camera-modal__preview" style="display: none;">
+                <img id="photoPreview" class="camera-modal__photo" alt="撮影した画像" />
             </div>
             
             <!-- エラー/注意表示領域 -->
             <div id="cameraError" class="camera-modal__error" role="alert" aria-live="assertive" style="display: none;"></div>
             
             <!-- ローディング表示 -->
-            <div id="cameraLoading" class="camera-modal__loading" style="display: none;">
-                <span class="camera-modal__loading-spinner"></span>
-                <span>カメラを起動中...</span>
+            <div id="cameraLoading" class="camera-modal__loading" role="status" aria-live="polite" style="display: none;">
+                <span class="camera-modal__loading-spinner" aria-hidden="true"></span>
+                <span id="loadingText">カメラを起動中...</span>
             </div>
             
-            <!-- 操作ボタン -->
-            <div class="camera-modal__actions">
+            <!-- カメラプレビュー時の操作ボタン -->
+            <div id="cameraActions" class="camera-modal__actions">
                 <button type="button" id="btnCameraCapture" class="btn btn--primary btn--large" aria-label="シャッターを切って撮影">
                     📸 シャッター
                 </button>
                 <button type="button" id="btnCameraClose" class="btn btn--secondary btn--large" aria-label="カメラを閉じる">
                     ✕ 閉じる
+                </button>
+            </div>
+            
+            <!-- 画像プレビュー時の操作ボタン -->
+            <div id="photoActions" class="camera-modal__actions" style="display: none;">
+                <button type="button" id="btnRetake" class="btn btn--secondary btn--large" aria-label="もう一度撮影する">
+                    🔄 再撮影
+                </button>
+                <button type="button" id="btnRotate" class="btn btn--secondary btn--large" aria-label="画像を90度回転">
+                    🔄 回転
+                </button>
+                <button type="button" id="btnUsePhoto" class="btn btn--primary btn--large" aria-label="この画像を使用する">
+                    ✓ この画像を使う
                 </button>
             </div>
         </div>

@@ -702,6 +702,13 @@ select.form-field__input {
     object-fit: cover;
 }
 
+.camera-modal__photo {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background-color: #000;
+}
+
 .camera-modal__canvas {
     position: absolute;
     top: 0;
@@ -760,6 +767,7 @@ select.form-field__input {
     display: flex;
     gap: 0.75rem;
     flex-wrap: wrap;
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .btn--large {
