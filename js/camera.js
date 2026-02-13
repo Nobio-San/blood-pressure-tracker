@@ -15,6 +15,39 @@ const JPEG_QUALITY = 0.8; // JPEG圧縮品質（0.0〜1.0、OCR前提で高め�
 const OUTPUT_MIME = 'image/jpeg'; // 出力MIME type
 const CAMERA_STORAGE_KEY = 'bp:lastCapturedImage'; // sessionStorage保存キー
 
+// Phase 2 Step 2-3: 撮影ガイド機能関連
+const GUIDE_CONFIG = {
+    // ガイド枠サイズ（コンテナに対する割合）
+    frameWidthRatio: 0.88,          // 幅: コンテナの88%
+    frameHeightRatio: 0.50,         // 高さ: コンテナの50%
+    frameAspect: null,              // 縦横比（TODO: 血圧計表示部の実寸が判明次第設定）
+    
+    // マスク設定
+    maskColor: 'rgba(0, 0, 0, 0.45)', // マスクの濃度
+    
+    // 枠スタイル
+    frameBorderWidth: 3,            // 枠線の太さ（px）
+    frameBorderColor: '#4a90e2',    // 枠線の色
+    frameBorderRadius: 8,           // 枠の角丸（px）
+    
+    // テキスト設定
+    guideText: '血圧計の表示部分を枠内に合わせてください',
+    hintText: '明るい場所で、反射に注意してください',
+    textFontSize: 18,               // フォントサイズ（px）
+    textColor: '#ffffff',           // テキストの色
+    textBackgroundColor: 'rgba(0, 0, 0, 0.7)', // テキスト背景の色
+    
+    // グリッド設定
+    gridEnabled: false,             // グリッド表示ON/OFF
+    gridColor: 'rgba(255, 255, 255, 0.3)', // グリッド線の色
+    
+    // 下部余白（操作UI領域を避ける）
+    bottomSafetyMargin: 20,         // 操作UIとの間の余白（px）
+    
+    // リサイズデバウンス時間
+    resizeDebounceMs: 150           // リサイズイベントのデバウンス（ms）
+};
+
 /* =========================================
    状態定義（State Machine）
    ========================================= */
@@ -35,6 +68,13 @@ let currentPhotoData = null; // 撮影中の画像データ（一時保持）
 let originalCapturedBlob = null; // 撮影直後のオリジナルblob（回転用）
 let currentObjectUrl = null; // 表示用Object URL（revoke用）
 let rotationAngle = 0; // 現在の回転角（0/90/180/270）
+
+// Phase 2 Step 2-3: ガイド機能用の内部状態
+let guideOverlayEl = null; // ガイドオーバーレイ要素
+let guideFrameEl = null; // ガイド枠要素
+let resizeObserver = null; // リサイズ監視
+let resizeTimer = null; // デバウンス用タイマー
+let currentGuideROI = { x: 0, y: 0, w: 0, h: 0 }; // 現在のROI（正規化座標）
 
 /* =========================================
    エラーコード定義
@@ -390,6 +430,9 @@ function stopCamera() {
     originalCapturedBlob = null;
     rotationAngle = 0;
 
+    // Phase 2 Step 2-3: ガイドのクリーンアップ
+    disposeGuide();
+
     isStarting = false;
     setState(STATE.CAMERA_PREVIEW);
     log('Camera stopped');
@@ -633,6 +676,299 @@ async function usePhoto() {
 }
 
 /* =========================================
+   Phase 2 Step 2-3: 撮影ガイド機能
+   ========================================= */
+
+/**
+ * ガイドオーバーレイを生成してコンテナに追加
+ * 入力: プレビューコンテナ要素
+ * 出力: なし
+ * 副作用: DOM生成・追加、内部変数（guideOverlayEl, guideFrameEl）の更新
+ * @param {HTMLElement} containerEl - プレビューコンテナ要素
+ */
+function createGuideOverlay(containerEl) {
+    log('createGuideOverlay() called');
+    
+    // 既存のガイドを削除（念のため）
+    if (guideOverlayEl) {
+        disposeGuide();
+    }
+    
+    // オーバーレイ要素を生成
+    guideOverlayEl = document.createElement('div');
+    guideOverlayEl.className = 'camera-guide';
+    guideOverlayEl.setAttribute('aria-hidden', 'true');
+    
+    // ガイド枠を生成
+    guideFrameEl = document.createElement('div');
+    guideFrameEl.className = 'camera-guide__frame';
+    
+    // グリッド（任意）
+    if (GUIDE_CONFIG.gridEnabled) {
+        const gridEl = document.createElement('div');
+        gridEl.className = 'camera-guide__grid';
+        guideFrameEl.appendChild(gridEl);
+    }
+    
+    // 案内テキストを生成
+    const textEl = document.createElement('div');
+    textEl.className = 'camera-guide__text';
+    textEl.textContent = GUIDE_CONFIG.guideText;
+    
+    // ヒントテキストを生成（任意）
+    if (GUIDE_CONFIG.hintText) {
+        const hintEl = document.createElement('div');
+        hintEl.className = 'camera-guide__hint';
+        hintEl.textContent = GUIDE_CONFIG.hintText;
+        textEl.appendChild(hintEl);
+    }
+    
+    // オーバーレイに追加
+    guideOverlayEl.appendChild(guideFrameEl);
+    guideOverlayEl.appendChild(textEl);
+    
+    // コンテナに追加
+    containerEl.appendChild(guideOverlayEl);
+    
+    log('Guide overlay created');
+}
+
+/**
+ * ガイドレイアウトを計算・更新
+ * 入力: コンテナ矩形
+ * 出力: なし
+ * 副作用: ガイド要素のstyle更新、currentGuideROIの更新
+ * 注意: 操作ボタンはプレビューコンテナの外にあるため、干渉回避は不要
+ * @param {Object} options - オプション
+ * @param {DOMRect} options.containerRect - プレビューコンテナの矩形
+ */
+function updateGuideLayout({ containerRect }) {
+    if (!guideFrameEl || !guideOverlayEl) {
+        log('Guide elements not initialized');
+        return;
+    }
+    
+    const containerWidth = containerRect.width;
+    const containerHeight = containerRect.height;
+    
+    if (containerWidth === 0 || containerHeight === 0) {
+        log('Container has no dimensions, skipping layout');
+        return;
+    }
+    
+    // 枠サイズを計算
+    let frameWidth = containerWidth * GUIDE_CONFIG.frameWidthRatio;
+    let frameHeight = containerHeight * GUIDE_CONFIG.frameHeightRatio;
+    
+    // 縦横比が指定されている場合は調整
+    if (GUIDE_CONFIG.frameAspect) {
+        const currentAspect = frameWidth / frameHeight;
+        if (currentAspect > GUIDE_CONFIG.frameAspect) {
+            frameWidth = frameHeight * GUIDE_CONFIG.frameAspect;
+        } else {
+            frameHeight = frameWidth / GUIDE_CONFIG.frameAspect;
+        }
+    }
+    
+    // 枠の位置を計算（コンテナの中央に配置）
+    const frameLeft = (containerWidth - frameWidth) / 2;
+    const frameTop = (containerHeight - frameHeight) / 2;
+    
+    // スタイルを適用
+    guideFrameEl.style.width = `${frameWidth}px`;
+    guideFrameEl.style.height = `${frameHeight}px`;
+    guideFrameEl.style.left = `${frameLeft}px`;
+    guideFrameEl.style.top = `${frameTop}px`;
+    
+    // 案内テキストの位置を更新（枠の上に配置、重ならないように）
+    const textEl = guideOverlayEl.querySelector('.camera-guide__text');
+    if (textEl) {
+        const textHeight = textEl.offsetHeight || 60;
+        const gap = 12; // 枠とテキストの間隔（px）
+        const textTop = frameTop - textHeight - gap;
+        
+        if (textTop >= 8) {
+            // 枠の上にテキストが収まる場合
+            textEl.style.top = `${textTop}px`;
+            textEl.style.bottom = '';
+        } else {
+            // 上に収まらない場合は枠の下に配置
+            const textBottom = containerHeight - (frameTop + frameHeight) - gap;
+            if (textBottom >= textHeight) {
+                textEl.style.top = `${frameTop + frameHeight + gap}px`;
+                textEl.style.bottom = '';
+            } else {
+                // どちらも十分でなければ上端に配置
+                textEl.style.top = '8px';
+                textEl.style.bottom = '';
+            }
+        }
+    }
+    
+    // ROI（正規化座標）を更新
+    currentGuideROI = {
+        x: frameLeft / containerWidth,
+        y: frameTop / containerHeight,
+        w: frameWidth / containerWidth,
+        h: frameHeight / containerHeight
+    };
+    
+    log('Guide layout updated', {
+        container: { width: containerWidth, height: containerHeight },
+        frame: { width: frameWidth, height: frameHeight, left: frameLeft, top: frameTop },
+        roi: currentGuideROI
+    });
+}
+
+/**
+ * ガイドの表示/非表示を切り替え
+ * 入力: 表示フラグ
+ * 出力: なし
+ * 副作用: ガイド要素のクラス更新
+ * @param {boolean} isVisible - 表示する場合true
+ */
+function toggleGuideVisible(isVisible) {
+    if (!guideOverlayEl) {
+        return;
+    }
+    
+    if (isVisible) {
+        guideOverlayEl.classList.remove('camera-guide--hidden');
+        log('Guide visible');
+    } else {
+        guideOverlayEl.classList.add('camera-guide--hidden');
+        log('Guide hidden');
+    }
+}
+
+/**
+ * グリッド表示のON/OFF（任意機能）
+ * 入力: グリッド表示フラグ
+ * 出力: なし
+ * 副作用: ガイド枠要素のクラス更新
+ * @param {boolean} isOn - グリッド表示する場合true
+ */
+function toggleGuideGrid(isOn) {
+    if (!guideFrameEl) {
+        return;
+    }
+    
+    if (isOn) {
+        guideFrameEl.classList.add('camera-guide__frame--grid');
+        log('Grid enabled');
+    } else {
+        guideFrameEl.classList.remove('camera-guide__frame--grid');
+        log('Grid disabled');
+    }
+}
+
+/**
+ * ガイド枠ROI（正規化座標）を取得
+ * 入力: なし
+ * 出力: ROI（0〜1の正規化座標）
+ * 副作用: なし
+ * 注意: この座標は"表示上"の座標であり、object-fit: coverでトリミングされた
+ *       実画像への変換はPhase 3で別途実装が必要
+ * @returns {{ x: number, y: number, w: number, h: number }} ROI（0〜1）
+ */
+function getGuideROI() {
+    return { ...currentGuideROI };
+}
+
+/**
+ * リサイズ/回転追従の開始
+ * 入力: プレビューコンテナ要素
+ * 出力: なし
+ * 副作用: イベントリスナー登録、ResizeObserver登録
+ * @param {HTMLElement} containerEl - プレビューコンテナ要素
+ */
+function startGuideResizeTracking(containerEl) {
+    log('startGuideResizeTracking() called');
+    
+    // レイアウト更新関数（デバウンスなし、ResizeObserverから直接呼ぶ）
+    const runLayout = () => {
+        const containerRect = containerEl.getBoundingClientRect();
+        updateGuideLayout({ containerRect });
+    };
+    
+    // デバウンス付きのレイアウト更新関数（windowイベント用）
+    const debouncedLayout = () => {
+        if (resizeTimer) {
+            clearTimeout(resizeTimer);
+        }
+        resizeTimer = setTimeout(runLayout, GUIDE_CONFIG.resizeDebounceMs);
+    };
+    
+    // ResizeObserverでコンテナのサイズ変更を監視（最も正確）
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => {
+            runLayout();
+        });
+        resizeObserver.observe(containerEl);
+        log('ResizeObserver started for container');
+    }
+    
+    // resize / orientationchange も監視（フォールバック）
+    window.addEventListener('resize', debouncedLayout);
+    window.addEventListener('orientationchange', debouncedLayout);
+    
+    // 初回レイアウト計算
+    requestAnimationFrame(() => {
+        runLayout();
+    });
+}
+
+/**
+ * リサイズ/回転追従の停止とクリーンアップ
+ * 入力: なし
+ * 出力: なし
+ * 副作用: イベントリスナー解除、タイマークリア
+ */
+function stopGuideResizeTracking() {
+    log('stopGuideResizeTracking() called');
+    
+    if (resizeTimer) {
+        clearTimeout(resizeTimer);
+        resizeTimer = null;
+    }
+    
+    // ResizeObserverの解除
+    if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+        log('ResizeObserver stopped');
+    }
+    
+    // イベントリスナー解除は、モーダル全体が破棄されるため省略
+    // （名前付き関数として参照を保持する実装も可能だが、簡易版として実装）
+}
+
+/**
+ * ガイド機能のクリーンアップ
+ * 入力: なし
+ * 出力: なし
+ * 副作用: DOM削除、イベント解除、内部変数リセット
+ */
+function disposeGuide() {
+    log('disposeGuide() called');
+    
+    // イベント解除
+    stopGuideResizeTracking();
+    
+    // DOM削除
+    if (guideOverlayEl && guideOverlayEl.parentNode) {
+        guideOverlayEl.parentNode.removeChild(guideOverlayEl);
+    }
+    
+    // 内部変数リセット
+    guideOverlayEl = null;
+    guideFrameEl = null;
+    currentGuideROI = { x: 0, y: 0, w: 0, h: 0 };
+    
+    log('Guide disposed');
+}
+
+/* =========================================
    モジュールのエクスポート（グローバル公開）
    ========================================= */
 // 既存のapp.jsがmoduleでない場合はグローバルに公開
@@ -645,6 +981,15 @@ window.CameraModule = {
     rotatePhoto,
     usePhoto,
     clearSessionStorage,
+    // Phase 2 Step 2-3: ガイド機能
+    createGuideOverlay,
+    updateGuideLayout,
+    toggleGuideVisible,
+    toggleGuideGrid,
+    getGuideROI,
+    startGuideResizeTracking,
+    stopGuideResizeTracking,
+    disposeGuide,
     // 定数もエクスポート
     STATE,
     CAMERA_STORAGE_KEY

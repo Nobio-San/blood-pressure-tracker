@@ -1626,6 +1626,9 @@ function initCamera() {
                 await waitForVideoReady(cameraVideo);
                 
                 btnCameraCapture.disabled = false;
+                
+                // Phase 2 Step 2-3: ガイドオーバーレイを表示
+                initGuide();
             } else {
                 console.error('[Camera] カメラ起動失敗', result.error);
                 cameraLoading.style.display = 'none';
@@ -1739,5 +1742,37 @@ function initCamera() {
             videoEl.addEventListener('loadedmetadata', onReady);
             videoEl.addEventListener('canplay', onReady);
         });
+    }
+    
+    /**
+     * 撮影ガイドを初期化 (Phase 2 Step 2-3)
+     */
+    function initGuide() {
+        const { createGuideOverlay, startGuideResizeTracking } = window.CameraModule;
+        
+        if (!createGuideOverlay || !startGuideResizeTracking) {
+            console.warn('[Camera] ガイド機能が利用できません');
+            return;
+        }
+        
+        try {
+            // プレビューコンテナを取得
+            const previewContainer = document.getElementById('cameraPreviewContainer');
+            
+            if (!previewContainer) {
+                console.error('[Camera] プレビューコンテナが見つかりません');
+                return;
+            }
+            
+            // ガイドオーバーレイを生成
+            createGuideOverlay(previewContainer);
+            
+            // リサイズ追従を開始
+            startGuideResizeTracking(previewContainer);
+            
+            console.log('[Camera] ガイドを初期化しました');
+        } catch (err) {
+            console.error('[Camera] ガイド初期化エラー', err);
+        }
     }
 }
