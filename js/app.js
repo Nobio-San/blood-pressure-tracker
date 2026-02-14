@@ -13,6 +13,9 @@ const SYNC_RETRY_INTERVAL_MS = 300; // 再同期時の送信間隔（ミリ秒�
 const CHART_DAYS = 7; // グラフで表示する日数（過去N日）
 const MAX_DATA_RETENTION_DAYS = 365; // データ保持期間（日数）
 
+// Phase 2 Step 2-4: 画像プレビュー関連
+const IMAGE_PREVIEW_MAX_HEIGHT = 200; // サムネイル最大高さ（px）
+
 // バリデーション範囲
 const VALIDATION = {
     systolic: { min: 50, max: 250 },
@@ -26,6 +29,9 @@ const VALIDATION = {
 let records = [];
 let isResyncInProgress = false; // 再同期中フラグ（二重実行防止）
 let bpChartInstance = null; // Chart.js インスタンス（描画/更新用）
+
+// Phase 2 Step 2-4: 画像状態管理
+let currentSelectedImage = null; // 現在選択中の画像データ { base64, width, height, mime, createdAt }
 
 // アプリの初期化
 document.addEventListener('DOMContentLoaded', () => {
@@ -110,6 +116,9 @@ function init() {
     
     // カメラ機能の初期化 (Phase 2 Step 2-1)
     initCamera();
+    
+    // Phase 2 Step 2-4: 画像プレビュー機能の初期化
+    initImagePreview();
     
     // 初期表示
     refreshRecordList();
@@ -886,6 +895,9 @@ async function handleSubmit(event) {
             showMessage('warn', 'ローカルに保存しました（クラウド同期は失敗しました。後で「未同期を再送」ボタンから再試行できます）');
         }
         
+        // Phase 2 Step 2-4: 記録保存成功後に画像をクリア
+        clearImageAfterSave();
+        
     } catch (error) {
         console.error('保存処理エラー:', error);
         showMessage('error', '予期しないエラーが発生しました');
@@ -922,7 +934,7 @@ function getFirstErrorField(form, errors) {
 }
 
 /**
- * クリアボタン処理（フォームリセット＋日時再セット＋メッセージクリア＋フォーカス戻し）
+ * クリアボタン処理（フォームリセット＋日時再セット＋メッセージクリア＋フォーカス戻し＋画像クリア）
  * @param {HTMLFormElement} form - フォーム要素
  * @param {HTMLInputElement} measuredAtInput - 測定日時入力要素
  * @param {HTMLInputElement} memberInput - メンバー入力要素
@@ -936,6 +948,11 @@ function handleClear(form, measuredAtInput, memberInput) {
     
     // 測定日時を現在日時に再セット
     measuredAtInput.value = formatToDatetimeLocal(new Date());
+    
+    // Phase 2 Step 2-4: 画像もクリア
+    if (currentSelectedImage) {
+        handleRemoveImage();
+    }
     
     // 先頭フィールド（メンバー）にフォーカスを戻す
     if (memberInput) {
@@ -1513,14 +1530,13 @@ function initCamera() {
                 const result = await usePhoto();
                 
                 if (result.ok) {
-                    showMessage('success', '画像を保存しました');
                     console.log('[Camera] 画像をsessionStorageに保存成功');
-                    
-                    // TODO: Step 2-4で入力フォームへ反映する処理を追加
                     
                     // カメラを閉じる
                     stopCameraWithUI();
                     hideCameraModal();
+                    
+                    // メッセージはapp.jsの画像選択イベントハンドラで表示される
                 } else {
                     showError({ code: 'SAVE_ERROR', message: result.error });
                 }
@@ -1774,5 +1790,308 @@ function initCamera() {
         } catch (err) {
             console.error('[Camera] ガイド初期化エラー', err);
         }
+    }
+}
+
+/* =========================================
+   Phase 2 Step 2-4: 画像プレビュー機能
+   ========================================= */
+
+/**
+ * 画像プレビュー機能の初期化
+ * 目的: カメラから撮影した画像を入力フォーム上で表示・管理する
+ */
+function initImagePreview() {
+    console.log('[ImagePreview] 初期化開始');
+    
+    // DOM要素の取得
+    const imagePreviewSection = document.getElementById('imagePreviewSection');
+    const previewImage = document.getElementById('previewImage');
+    const btnRemoveImage = document.getElementById('btnRemoveImage');
+    const imageZoomModal = document.getElementById('imageZoomModal');
+    const zoomImage = document.getElementById('zoomImage');
+    const btnCloseZoom = document.getElementById('btnCloseZoom');
+    
+    if (!imagePreviewSection || !previewImage || !btnRemoveImage) {
+        console.warn('[ImagePreview] 必要なDOM要素が見つかりません');
+        return;
+    }
+    
+    // カメラからの画像選択イベントをリスン
+    document.addEventListener('bp:image:selected', handleImageSelected);
+    
+    // 画像削除ボタン
+    btnRemoveImage.addEventListener('click', handleRemoveImage);
+    
+    // 画像タップで拡大表示
+    previewImage.addEventListener('click', handleImageClick);
+    
+    // 拡大モーダルの閉じるボタン
+    if (btnCloseZoom) {
+        btnCloseZoom.addEventListener('click', closeImageZoom);
+    }
+    
+    // モーダル背景クリックで閉じる
+    if (imageZoomModal) {
+        imageZoomModal.addEventListener('click', (e) => {
+            if (e.target === imageZoomModal || e.target.classList.contains('image-zoom-modal__overlay')) {
+                closeImageZoom();
+            }
+        });
+    }
+    
+    // Escキーで拡大モーダルを閉じる
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && imageZoomModal && imageZoomModal.style.display !== 'none') {
+            closeImageZoom();
+        }
+    });
+    
+    // sessionStorageから既存画像を復元（ページリロード対応）
+    restoreImageFromSessionStorage();
+    
+    console.log('[ImagePreview] 初期化完了');
+}
+
+/**
+ * カメラからの画像選択イベントハンドラ
+ * @param {CustomEvent} event - 画像選択イベント
+ */
+function handleImageSelected(event) {
+    console.log('[ImagePreview] 画像選択イベント受信', event.detail);
+    
+    const imageData = event.detail;
+    
+    if (!imageData || !imageData.base64) {
+        console.error('[ImagePreview] 無効な画像データ');
+        return;
+    }
+    
+    // 画像データを保存
+    currentSelectedImage = {
+        base64: imageData.base64,
+        width: imageData.width,
+        height: imageData.height,
+        mime: imageData.mime || 'image/jpeg',
+        createdAt: imageData.createdAt || new Date().toISOString(),
+        rotation: imageData.rotation || 0
+    };
+    
+    // プレビュー表示
+    showImagePreview();
+    
+    // 成功メッセージを表示
+    showMessage('success', '画像を読み込みました。画像を見ながら血圧値を入力してください。');
+    
+    console.log('[ImagePreview] 画像プレビュー表示完了');
+}
+
+/**
+ * 画像プレビューを表示
+ */
+function showImagePreview() {
+    const imagePreviewSection = document.getElementById('imagePreviewSection');
+    const previewImage = document.getElementById('previewImage');
+    
+    if (!imagePreviewSection || !previewImage || !currentSelectedImage) {
+        return;
+    }
+    
+    // 画像を表示
+    previewImage.src = currentSelectedImage.base64;
+    imagePreviewSection.style.display = 'block';
+    
+    // 入力フィールドのプレースホルダーを更新
+    updateFormPlaceholders(true);
+    
+    console.log('[ImagePreview] プレビュー表示');
+}
+
+/**
+ * 画像プレビューを非表示
+ */
+function hideImagePreview() {
+    const imagePreviewSection = document.getElementById('imagePreviewSection');
+    const previewImage = document.getElementById('previewImage');
+    
+    if (!imagePreviewSection || !previewImage) {
+        return;
+    }
+    
+    // 画像を非表示
+    imagePreviewSection.style.display = 'none';
+    previewImage.src = '';
+    
+    // 入力フィールドのプレースホルダーを元に戻す
+    updateFormPlaceholders(false);
+    
+    console.log('[ImagePreview] プレビュー非表示');
+}
+
+/**
+ * 画像削除ハンドラ
+ */
+function handleRemoveImage() {
+    console.log('[ImagePreview] 画像削除');
+    
+    // 画像データをクリア
+    currentSelectedImage = null;
+    
+    // sessionStorageから削除
+    if (window.CameraModule && window.CameraModule.clearSessionStorage) {
+        window.CameraModule.clearSessionStorage();
+    }
+    
+    // プレビュー非表示
+    hideImagePreview();
+    
+    // 拡大モーダルも閉じる（開いている場合）
+    closeImageZoom();
+    
+    console.log('[ImagePreview] 画像削除完了');
+}
+
+/**
+ * 画像クリックハンドラ（拡大表示）
+ */
+function handleImageClick() {
+    console.log('[ImagePreview] 画像クリック - 拡大表示');
+    
+    if (!currentSelectedImage) {
+        return;
+    }
+    
+    const imageZoomModal = document.getElementById('imageZoomModal');
+    const zoomImage = document.getElementById('zoomImage');
+    
+    if (!imageZoomModal || !zoomImage) {
+        console.warn('[ImagePreview] 拡大モーダル要素が見つかりません');
+        return;
+    }
+    
+    // 拡大画像を設定
+    zoomImage.src = currentSelectedImage.base64;
+    
+    // モーダルを表示
+    imageZoomModal.style.display = 'flex';
+    
+    // 背面スクロールを固定
+    document.body.style.overflow = 'hidden';
+    
+    // フォーカスを閉じるボタンへ
+    const btnCloseZoom = document.getElementById('btnCloseZoom');
+    if (btnCloseZoom) {
+        setTimeout(() => btnCloseZoom.focus(), 100);
+    }
+    
+    console.log('[ImagePreview] 拡大モーダル表示');
+}
+
+/**
+ * 拡大表示を閉じる
+ */
+function closeImageZoom() {
+    const imageZoomModal = document.getElementById('imageZoomModal');
+    const zoomImage = document.getElementById('zoomImage');
+    
+    if (!imageZoomModal) {
+        return;
+    }
+    
+    // モーダルを非表示
+    imageZoomModal.style.display = 'none';
+    
+    // 画像をクリア
+    if (zoomImage) {
+        zoomImage.src = '';
+    }
+    
+    // 背面スクロールを復元
+    document.body.style.overflow = '';
+    
+    // フォーカスをプレビュー画像に戻す
+    const previewImage = document.getElementById('previewImage');
+    if (previewImage) {
+        setTimeout(() => previewImage.focus(), 100);
+    }
+    
+    console.log('[ImagePreview] 拡大モーダル閉じる');
+}
+
+/**
+ * sessionStorageから画像を復元
+ */
+function restoreImageFromSessionStorage() {
+    if (!window.CameraModule || !window.CameraModule.CAMERA_STORAGE_KEY) {
+        return;
+    }
+    
+    try {
+        const storageKey = window.CameraModule.CAMERA_STORAGE_KEY;
+        const json = sessionStorage.getItem(storageKey);
+        
+        if (!json) {
+            return;
+        }
+        
+        const imageData = JSON.parse(json);
+        
+        if (imageData && imageData.base64) {
+            currentSelectedImage = {
+                base64: imageData.base64,
+                width: imageData.width,
+                height: imageData.height,
+                mime: imageData.mime || 'image/jpeg',
+                createdAt: imageData.createdAt || new Date().toISOString(),
+                rotation: imageData.rotation || 0
+            };
+            
+            showImagePreview();
+            console.log('[ImagePreview] sessionStorageから画像を復元しました');
+        }
+    } catch (err) {
+        console.error('[ImagePreview] sessionStorageからの復元失敗', err);
+    }
+}
+
+/**
+ * フォームのプレースホルダーを更新
+ * @param {boolean} hasImage - 画像がある場合true
+ */
+function updateFormPlaceholders(hasImage) {
+    const systolicInput = document.getElementById('systolic');
+    const diastolicInput = document.getElementById('diastolic');
+    const pulseInput = document.getElementById('pulse');
+    
+    if (hasImage) {
+        if (systolicInput) {
+            systolicInput.placeholder = '画像を見ながら入力';
+        }
+        if (diastolicInput) {
+            diastolicInput.placeholder = '画像を見ながら入力';
+        }
+        if (pulseInput) {
+            pulseInput.placeholder = '画像を見ながら入力';
+        }
+    } else {
+        if (systolicInput) {
+            systolicInput.placeholder = '50〜250';
+        }
+        if (diastolicInput) {
+            diastolicInput.placeholder = '30〜150';
+        }
+        if (pulseInput) {
+            pulseInput.placeholder = '40〜200';
+        }
+    }
+}
+
+/**
+ * 記録保存成功後に画像をクリア
+ */
+function clearImageAfterSave() {
+    if (currentSelectedImage) {
+        console.log('[ImagePreview] 保存完了 - 画像をクリア');
+        handleRemoveImage();
     }
 }

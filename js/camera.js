@@ -612,7 +612,7 @@ async function rotatePhoto({ previewImg }) {
 }
 
 /**
- * 画像を採用（sessionStorageに保存）
+ * 画像を採用（sessionStorageに保存 + app.jsへイベント通知）
  * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
  */
 async function usePhoto() {
@@ -668,10 +668,44 @@ async function usePhoto() {
         }
         
         log('Photo saved successfully');
+        
+        // Phase 2 Step 2-4: app.jsへ画像選択イベントを通知
+        dispatchImageSelectedEvent(currentPhotoData);
+        
         return { ok: true };
     } catch (err) {
         log('Failed to use photo', err);
         return { ok: false, error: err.message || '画像の保存に失敗しました' };
+    }
+}
+
+/**
+ * Phase 2 Step 2-4: 画像選択イベントをdocumentに通知
+ * 入力: 画像データ
+ * 出力: なし
+ * 副作用: CustomEventをdispatch
+ * @param {Object} imageData - 画像データ
+ */
+function dispatchImageSelectedEvent(imageData) {
+    try {
+        const event = new CustomEvent('bp:image:selected', {
+            detail: {
+                base64: imageData.base64,
+                width: imageData.width,
+                height: imageData.height,
+                mime: OUTPUT_MIME,
+                createdAt: new Date().toISOString(),
+                rotation: rotationAngle
+            }
+        });
+        
+        document.dispatchEvent(event);
+        log('Image selected event dispatched', {
+            width: imageData.width,
+            height: imageData.height
+        });
+    } catch (err) {
+        log('Failed to dispatch image selected event', err);
     }
 }
 
