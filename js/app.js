@@ -2095,3 +2095,157 @@ function clearImageAfterSave() {
         handleRemoveImage();
     }
 }
+
+/* =========================================
+   Phase 3 Step 3-1: OCRテスト機能（開発時のみ）
+   ========================================= */
+
+/**
+ * OCRテスト機能の初期化
+ * 目的: URLパラメータ ?debug=1 でOCRテストボタンを表示し、疎通確認を行う
+ */
+function initOcrTest() {
+    // URLパラメータをチェック
+    const urlParams = new URLSearchParams(window.location.search);
+    const isDebugMode = urlParams.get('debug') === '1';
+    
+    if (!isDebugMode) {
+        console.log('[OCR Test] デバッグモードではありません（URLに ?debug=1 を追加すると有効化されます）');
+        return;
+    }
+    
+    console.log('[OCR Test] デバッグモード有効 - OCRテストボタンを表示します');
+    
+    const btnOcrTest = document.getElementById('btnOcrTest');
+    if (!btnOcrTest) {
+        console.warn('[OCR Test] OCRテストボタンが見つかりません');
+        return;
+    }
+    
+    // ボタンを表示
+    btnOcrTest.style.display = 'inline-block';
+    
+    // クリックイベントを追加
+    btnOcrTest.addEventListener('click', handleOcrTest);
+    
+    console.log('[OCR Test] 初期化完了');
+}
+
+/**
+ * OCRテストハンドラ
+ */
+async function handleOcrTest() {
+    console.log('[OCR Test] テスト開始');
+    
+    // OCRモジュールの確認
+    if (!window.OCR) {
+        alert('OCRモジュールが読み込まれていません');
+        console.error('[OCR Test] window.OCR が存在しません');
+        return;
+    }
+    
+    const { recognizeText } = window.OCR;
+    
+    // 現在選択中の画像があるかチェック
+    if (currentSelectedImage && currentSelectedImage.base64) {
+        await testOcrWithImage(currentSelectedImage.base64);
+    } else {
+        // テスト用のサンプル画像を生成（数字を描画したcanvas）
+        await testOcrWithSampleImage();
+    }
+}
+
+/**
+ * 画像を使ってOCRをテスト
+ * @param {string} imageBase64 - Base64エンコードされた画像
+ */
+async function testOcrWithImage(imageBase64) {
+    console.log('[OCR Test] 画像を使用してOCRテスト');
+    
+    const btnOcrTest = document.getElementById('btnOcrTest');
+    const originalText = btnOcrTest ? btnOcrTest.textContent : '';
+    
+    try {
+        if (btnOcrTest) {
+            btnOcrTest.disabled = true;
+            btnOcrTest.textContent = '🔍 認識中...';
+        }
+        
+        showMessage('success', 'OCR処理を開始しています...');
+        
+        const startTime = performance.now();
+        
+        // OCR実行（進捗表示付き）
+        const result = await window.OCR.recognizeText(imageBase64, {
+            onProgress: (info) => {
+                console.log(`[OCR Test] 進捗: ${info.status} - ${Math.round(info.progress * 100)}%`);
+            }
+        });
+        
+        const elapsedTime = Math.round(performance.now() - startTime);
+        
+        console.log('[OCR Test] 認識結果:', result);
+        console.log(`[OCR Test] 処理時間: ${elapsedTime}ms`);
+        
+        // 結果を表示
+        const message = `【OCR認識結果】\n` +
+                       `認識テキスト: "${result.rawText.trim()}"\n` +
+                       `信頼度: ${Math.round(result.confidence)}%\n` +
+                       `処理時間: ${elapsedTime}ms`;
+        
+        alert(message);
+        showMessage('success', 'OCR認識が完了しました');
+        
+    } catch (error) {
+        console.error('[OCR Test] エラー:', error);
+        alert(`OCR認識に失敗しました\n${error.message}`);
+        showMessage('error', 'OCR認識に失敗しました');
+    } finally {
+        if (btnOcrTest) {
+            btnOcrTest.textContent = originalText;
+            btnOcrTest.disabled = false;
+        }
+    }
+}
+
+/**
+ * サンプル画像を生成してOCRをテスト
+ */
+async function testOcrWithSampleImage() {
+    console.log('[OCR Test] サンプル画像を生成してOCRテスト');
+    
+    // canvasにテスト用の数字を描画
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 200;
+    const ctx = canvas.getContext('2d');
+    
+    // 背景を白に
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // 血圧計風の数字を描画
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 48px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    ctx.fillText('120 / 80', canvas.width / 2, canvas.height / 2 - 30);
+    ctx.fillText('75', canvas.width / 2, canvas.height / 2 + 30);
+    
+    // canvasをBase64に変換
+    const imageBase64 = canvas.toDataURL('image/png');
+    
+    console.log('[OCR Test] サンプル画像生成完了');
+    
+    // OCRテスト実行
+    await testOcrWithImage(imageBase64);
+}
+
+// アプリ初期化時にOCRテストを初期化（既存のinit関数に追加）
+document.addEventListener('DOMContentLoaded', () => {
+    // 既存の初期化の後にOCRテストを初期化
+    // init() は既に呼ばれているので、ここでは追加分のみ
+    initOcrTest();
+});
+

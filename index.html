@@ -20,6 +20,9 @@
     <link rel="stylesheet" href="css/style.css">
     <!-- Chart.js 4.x CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Tesseract.js CDN（バージョン固定: v5.0.3） -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+    <script src="js/ocr.js?v=1" defer></script>
     <script src="js/sheets-api.js?v=3" defer></script>
     <script src="js/camera.js?v=3" defer></script>
     <script src="js/app.js?v=3" defer></script>
@@ -78,6 +81,10 @@
             <div class="camera-trigger">
                 <button type="button" id="btnOpenCamera" class="btn btn--camera" aria-label="カメラで血圧計の画面を撮影">
                     📷 カメラで撮影
+                </button>
+                <!-- 開発時のみ: OCRテストボタン（URLパラメータ ?debug=1 で表示） -->
+                <button type="button" id="btnOcrTest" class="btn btn--secondary" style="display: none;" aria-label="OCR機能をテスト">
+                    🔍 OCRテスト
                 </button>
             </div>
             <!-- メッセージ表示領域 -->

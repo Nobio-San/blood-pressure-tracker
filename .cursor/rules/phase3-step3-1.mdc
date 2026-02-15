@@ -1,0 +1,166 @@
+```md
+# ProjectRules.md（Cursor Project Rules 貼り付け用）
+
+## 1. 目的とスコープ
+- 目的: 撮影した血圧計画像に対して、Tesseract.js で文字認識（OCR）を実行できる **最小構成の基盤** を導入し、後続（前処理・値抽出・UI連携）の土台を作る。
+- スコープ（やること）:
+  - `index.html` に Tesseract.js（CDN）の読み込みを追加（**バージョン固定**）。
+  - `js/ocr.js` を新規作成し、OCRワーカーの **初期化 / 実行 / 破棄** の最小APIを提供。
+  - PC Chrome / Android Chrome（PWA想定）での疎通確認（開発メモ/README整備）。
+- 非スコープ（この段階ではやらない）:
+  - 画像前処理（傾き補正、二値化、ROI切り出し等）の最適化（後続 Step）。
+  - 血圧値の構造化抽出（SYS/DIA/PULSEの特定）（後続 Step）。
+  - 言語データ（tessdata）のローカル同梱・オフライン最適化（後続 Step）。
+  - 本番UIの完成（この段階は「動く土台」を優先）。
+
+## 2. 技術スタック
+- 使用言語: HTML / CSS / JavaScript
+- 依存/前提:
+  - ビルドなし（素のHTML/JSを `script` タグで読み込む）
+  - Tesseract.js は CDN から読み込み（**URL とバージョンを固定する**）
+  - OCR 言語は `jpn+eng` を基本（重いので最適化は後続）
+  - 対象端末: Android Chrome（PWA）を第一ターゲット
+- TODO:
+  - CDN配信元（例: jsDelivr / cdnjs）と **固定バージョン** を決める
+  - `langPath` を指定するか（CDN上の tessdata を使うか）を決める
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル（このStepで触る/増える）:
+  - `index.html` … Tesseract.js と `js/ocr.js` の読み込み追加
+  - `js/ocr.js` … OCRワーカー管理（新規）
+  - `README.md`（または開発メモ）… 導入手順・疎通確認・トラブルシュート
+  - （既存想定）`js/app.js`, `js/camera.js` … 画像取得側（本StepはI/Fだけ想定）
+- 読み込み順（原則）:
+  - HTML → CSS → JS
+  - JSは「依存されるものを先に」
+    - Tesseract.js（CDN） → `js/ocr.js` → `js/camera.js` → `js/app.js`
+- スクリプト属性:
+  - `defer` を基本に統一（ロード順の混乱を避ける）
+- TODO:
+  - Service Worker/PWA が既にある場合、更新反映（キャッシュ）手順を README に明記
+
+## 4. コーディング規約（横断）
+- 命名:
+  - JavaScript: lowerCamelCase（関数/変数）、UpperCamelCase（クラス）
+  - CSS: BEM（`block__elem--mod`）か Utility の **どちらかに統一**（混在禁止）
+- コメント:
+  - 原則日本語。関数の先頭に「入出力・副作用・例外」を1行で明記
+- 構造:
+  - 設定/定数・ドメインロジック・I/O（カメラ/ネット）・UI更新を層分離
+- 依存:
+  - グローバル共有を最小化
+  - ただし本Stepはビルドなし前提のため、公開APIは `window.OCR` で提供（後でES Modulesへ移行しやすい設計にする）
+- 魔法数禁止:
+  - OCR設定（lang/PSM/whitelist等）は `js/ocr.js` 内の `const` に集約
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 OCR API（`js/ocr.js`）
+- 目的: app側が「初期化→OCR→破棄」を迷わず呼べる。
+- 公開API（`window.OCR`）:
+  - `initOcr(options?) => Promise<void>`
+  - `recognizeText(image, options?) => Promise<{ rawText: string, confidence: number, data?: any }>`
+  - `terminateOcr() => Promise<void>`
+- 進捗通知:
+  - `options.onProgress`（関数）を受け取り、Tesseract logger から進捗を流せるようにする
+
+### 5.2 ワーカー初期化（シングルトン）
+- ワーカーは **シングルトン** とし、都度生成しない（重い処理・メモリ節約）
+- 多重初期化防止:
+  - `initPromise` を持ち、同時呼び出しは同じPromiseを返す
+- 言語:
+  - 基本 `jpn+eng`
+- 基本設定（初期値）:
+  - `tessedit_char_whitelist`: `0123456789/`（血圧表示の想定に合わせる。必要なら `.` `:` など追加）
+  - PSM（ページ分割モード）: まず `6` or `7` を採用（後続で最適化）
+  - TODO: OEM（エンジンモード）を固定するか検討
+- 例外/失敗時:
+  - 初期化中に失敗した場合は内部状態（worker, initPromise）をクリアし、再試行可能にする
+
+### 5.3 OCR 実行（`recognizeText(image)`）
+- `recognizeText` は内部で `initOcr()` を保証（呼び出し側が順序を間違えても動く）
+- 入力（image）は受け口を広めにする:
+  - URL / Base64 / `HTMLCanvasElement` / `Blob` / `ImageData` 相当
+  - ただし「どれを正式入力にするか」は README に明記し、呼び出し側で統一変換してもよい
+- 返却値:
+  - `rawText`: 認識全文（加工しない）
+  - `confidence`: 代表値（例: `data.confidence` 等の平均/代表）
+  - `data`: デバッグ用途で生データ（必要に応じて）
+- エラー時のルール:
+  - 例外を投げる（推奨） or `null` を返す、どちらかに統一（本プロジェクトは **例外を投げる** を基本）
+
+### 5.4 終了処理（メモリリーク対策）
+- `terminateOcr()` でワーカーを破棄できる
+- 破棄後は `initOcr()` により再初期化できる
+- 必要なら `beforeunload` 等で破棄（ただしPWAでは常駐もあるため、後続で「アイドル時破棄」など検討）
+
+## 6. UI/UX・入力操作の規約
+- 基本:
+  - OCR は重い処理のため、実行中は UI をブロックしない（async/await）
+  - 進捗表示（最低限）:
+    - `onProgress` を受け取れる設計にし、UI側でローディング/進捗を表示できるようにする
+- 疎通テスト導線（開発時のみ）:
+  - 「OCRテスト」ボタン、または URL パラメータ（例: `?debug=1`）でのみ表示
+  - 結果（`rawText` / `confidence`）を画面または console に表示
+  - 本番に残さないため、`DEBUG` フラグでガード
+
+## 7. パフォーマンス/品質
+- ワーカー再利用:
+  - 認識ごとに worker を作り直さない
+- 初回ロード配慮:
+  - `jpn` は重く初期化が遅い可能性があるため、ユーザー操作（撮影後など）に合わせて初期化するか、アイドル時先読み（後続検討）
+- 計測の目安（開発用）:
+  - 初回 `initOcr()` の所要時間、`recognizeText()` の所要時間を console に出せるようにする（DEBUG時）
+
+## 8. テスト/デバッグ（DoD）
+- Done（成功条件）:
+  - ブラウザで Tesseract.js が読み込まれ、ワーカー初期化ができる
+  - `recognizeText(image)` が実行でき、`rawText` と `confidence` を返せる
+  - `tessedit_char_whitelist` と PSM などの基本設定が反映されていることを確認できる
+- 検証手順（最低限）:
+  1) PC Chrome で `window.Tesseract`（もしくは想定グローバル）が参照できる
+  2) `initOcr()` が例外なく完了する
+  3) サンプル画像（血圧計でなくても可）で `recognizeText()` が成功する
+  4) 初回実行時のみ言語データ取得（Networkで traineddata 取得）を確認できる
+  5) 2回目以降の `initOcr()` で無駄な再ロードが起きない
+  6) `terminateOcr()` → `initOcr()` → `recognizeText()` が再度成功する
+  7) Android Chrome（実機）でも 2)〜4) を満たす
+- 典型トラブル（READMEへ明記）:
+  - CORS / 404（CDN・langPath）
+  - Service Worker キャッシュで更新が反映されない
+  - 初回ロードが遅い（言語データが大きい）
+
+## 9. リリース/更新運用
+- `todo.md`/手順書が更新されたら、本ルールの以下を差分反映:
+  - 追加/変更ファイル、OCR設定値（lang/PSM/whitelist）、テスト手順
+- README運用:
+  - 「導入したCDN URL（固定バージョン）」「疎通テスト手順」「トラブルシュート」を必ず更新
+
+## 10. 禁止事項/アンチパターン
+- バージョン未固定のCDN参照（挙動変化の原因）
+- OCRのたびに worker を生成・破棄する（極端に遅くなる）
+- 例外を握りつぶして原因不明にする（catchしても必ずログ/再スロー方針）
+- デバッグ導線（OCRテストUI）を本番で常時表示
+- 設定値（PSM/whitelist/langPath）を魔法数として散在
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（例: 「Tesseract.js CDN追加」「ocr.js 初期化API」など）
+- PRには「目的/変更点/確認観点（DoDの番号）/スクリーンショット or ログ」を記載
+
+---
+
+### 付録A: 言語別要点（最低限）
+- HTML: セマンティックタグ/aria-*、scriptのdefer統一
+- CSS: BEM or Utility 統一、アニメは transform/opacity
+- JS: 非同期処理の責務分離（入力/状態/描画/重処理）、純粋関数化、例外方針統一
+
+```
+
+```md
+# 生成ログ（要約）
+- 抽出した主要要件: Tesseract.js（CDN）導入、`js/ocr.js` 新規作成、`initOcr/recognizeText/terminateOcr` の最小API、Android Chrome（PWA）で動作、ワーカーはシングルトン再利用。
+- 重要な数値/条件: OCR言語は `jpn+eng`、whitelist は `0123456789/`、PSM は `6 or 7`（後続で最適化）。
+- テスト観点: 初回のみ traineddata 取得、2回目以降の再ロード抑制、terminate→reinit の再起動性、PC/Android 両方で1回以上OCR成功。
+- 未確定/TODO: CDN配信元と固定バージョン、`langPath` 方針、デプロイ先とCORS/キャッシュ方針、血圧計の表示レイアウトに最適なPSM。
+- 自動補完した規約: defer統一、設定値の定数化、例外方針統一、デバッグ導線はDEBUGガード。
+```
+

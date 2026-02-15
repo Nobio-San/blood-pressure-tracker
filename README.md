@@ -364,6 +364,133 @@ const SCRIPT_URL = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
 - 通知機能（測定時刻リマインダー）
 - PWA高度化（バックグラウンド同期、プッシュ通知など）
 
+## Phase 3: OCR機能（Tesseract.js）
+
+### 概要
+血圧計の画面を撮影した画像から、数値を自動的に読み取るOCR（光学文字認識）機能を導入しました。
+
+### 技術仕様
+- **OCRエンジン**: Tesseract.js v5.0.3（CDN経由）
+- **認識言語**: 日本語 + 英語（`jpn+eng`）
+- **認識対象文字**: 数字とスラッシュ（`0123456789/`）
+- **PSM（Page Segmentation Mode）**: 6（一様なテキストブロック）
+
+### ファイル構成
+- `js/ocr.js` - OCRモジュール（Tesseract.js wrapper）
+  - `window.OCR.initOcr()` - ワーカー初期化
+  - `window.OCR.recognizeText(image)` - OCR実行
+  - `window.OCR.terminateOcr()` - ワーカー破棄
+
+### 使用方法
+
+#### 基本的な使い方
+```javascript
+// 1. 初期化（自動実行されるため、通常は不要）
+await window.OCR.initOcr();
+
+// 2. OCR実行
+const result = await window.OCR.recognizeText(imageBase64);
+console.log('認識テキスト:', result.rawText);
+console.log('信頼度:', result.confidence);
+
+// 3. 終了（メモリ解放）
+await window.OCR.terminateOcr();
+```
+
+#### 進捗表示付きでOCRを実行
+```javascript
+const result = await window.OCR.recognizeText(imageBase64, {
+    onProgress: (info) => {
+        console.log(`${info.status}: ${Math.round(info.progress * 100)}%`);
+    }
+});
+```
+
+### 疎通テスト手順
+
+#### 1. デバッグモードの有効化
+アプリのURLに `?debug=1` パラメータを追加してアクセス：
+```
+http://localhost:8000/?debug=1
+```
+
+#### 2. OCRテストボタンの表示
+デバッグモードでは「🔍 OCRテスト」ボタンが表示されます。
+
+#### 3. テスト実行
+- **画像がある場合**: 撮影済みの画像に対してOCRを実行
+- **画像がない場合**: サンプル画像（`120 / 80` と `75`）を自動生成してOCRを実行
+
+#### 4. 結果確認
+- アラートで認識結果が表示されます
+- コンソールに詳細ログが出力されます
+
+### トラブルシュート
+
+#### 初回ロードが遅い
+- **症状**: OCR初回実行時に時間がかかる
+- **原因**: 言語データ（`jpn.traineddata` / `eng.traineddata`）のダウンロード
+- **対処**: 
+  - 初回のみ数秒〜十数秒かかります（通信速度に依存）
+  - 2回目以降はブラウザキャッシュが使用され、高速化されます
+
+#### CORS エラー
+- **症状**: コンソールに「CORS policy」エラー
+- **対処**: 
+  - Tesseract.js はCDN（jsDelivr）から配信されているため、通常は発生しません
+  - ローカルファイルで開いている場合は、HTTPサーバー経由でアクセスしてください
+
+#### ワーカーが初期化できない
+- **症状**: 「OCRワーカーの初期化に失敗しました」エラー
+- **対処**: 
+  - ブラウザのコンソールで詳細なエラーメッセージを確認
+  - ネットワーク接続を確認
+  - ブラウザキャッシュをクリアして再試行
+
+#### 認識精度が低い
+- **原因**: 
+  - 画像の解像度が低い
+  - 文字が小さい、または不鮮明
+  - 照明条件が悪い
+- **対処**: 
+  - 撮影時に血圧計の画面をできるだけ大きく撮影
+  - 十分な明るさで撮影
+  - 画像前処理（傾き補正、二値化など）は後続フェーズで実装予定
+
+### 技術的な詳細
+
+#### ワーカーのシングルトン管理
+OCRワーカーは重い処理のため、シングルトンとして管理されます：
+- 初回 `recognizeText()` 呼び出し時に自動的に初期化
+- 2回目以降は既存のワーカーを再利用
+- 多重初期化は防止されます
+
+#### メモリ管理
+長時間使用時のメモリリーク対策：
+- `terminateOcr()` でワーカーを破棄できます
+- ページリロード時、ワーカーは自動的に破棄されます
+- 今後、一定時間アイドル後の自動破棄も検討
+
+#### 設定のカスタマイズ
+`js/ocr.js` の `CONFIG` オブジェクトで設定を変更できます：
+```javascript
+const CONFIG = {
+    lang: 'jpn+eng',                              // 認識言語
+    langPath: 'https://cdn.jsdelivr.net/...',    // 言語データ配置先
+    tesseractConfig: {
+        tessedit_char_whitelist: '0123456789/',  // 認識対象文字
+        psm: 6                                    // ページ分割モード
+    }
+};
+```
+
+### 今後の予定（Phase 3 後続Step）
+- 画像前処理の最適化（傾き補正、二値化、ROI切り出し）
+- 血圧値の構造化抽出（SYS/DIA/PULSE の自動特定）
+- 認識結果の自動入力（フォームへの値のセット）
+- 言語データのローカル配置（オフライン最適化）
+- PSMの最適化（血圧計レイアウトに応じた調整）
+
 ## ライセンス
 このプロジェクトは個人用途での使用を想定しています。
 
