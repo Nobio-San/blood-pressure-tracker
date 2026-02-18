@@ -1,0 +1,201 @@
+```md
+# ProjectRules.md（貼り付け用）
+
+## 1. 目的とスコープ
+- 目的
+  - 血圧計の撮影画像に対して前処理（ROI切り抜き／グレースケール化／二値化／ノイズ除去等）を行い、Tesseract.js に渡す入力品質を上げて OCR 精度を改善する。
+- スコープ（やること）
+  - `preprocessImage(source, options)` を実装し、前処理済み `canvas` と `meta` を返す。
+  - 直列パイプラインで処理段階（ROI→グレースケール→二値化→（必要なら）ノイズ除去/モルフォロジー）を段階的に適用できる。
+  - デバッグ用に各段階のプレビュー表示・計測（処理時間、ROI、閾値など）を開発用トグルで提供する。
+  - OCR 呼び出し口へ前処理を接続し、失敗時フォールバック（前処理スキップ or 方式切替）を用意する。
+- 非スコープ（やらないこと）
+  - ネイティブライブラリ導入、重い外部画像処理 FW（OpenCV 等）の追加。
+  - UI 仕様の大改修（デバッグ領域はトグル時のみ最小追加）。
+  - 機種別に完全最適化された ROI 自動検出（本ステップは「ガイド枠に合わせた ROI」を優先）。
+
+## 2. 技術スタック
+- 使用言語/技術
+  - HTML / CSS / JavaScript（ES Modules）
+  - Canvas API（PWA/ブラウザ上で完結）
+  - Tesseract.js（既存 OCR）
+- 依存/前提
+  - 既存の `js/ocr.js` に Tesseract ワーカー初期化・OCR 呼び出し口がある（Step 3-1 の前提）。
+  - 撮影ガイド枠（画面上の矩形）と、撮影画像座標系へ変換可能な情報（video/canvas サイズ等）が取得できる。
+  - 画像の向き補正（EXIF 等）は別ステップで概ね解消されている想定（未解消なら本ステップで最小フォロー）。
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル（想定）
+  - `js/ocr.js`：OCR 呼び出し口、前処理の公開 I/F（export）
+  - `js/image-preprocess.js`（任意）：前処理ロジック切り出し（肥大化回避）
+  - `js/camera.js`（必要なら）：ガイド枠情報・撮影時の表示/実キャプチャ情報の提供
+  - `index.html` / `css/style.css`：デバッグプレビュー領域（トグル時のみ表示）
+  - `README.md`：デバッグ手順、代表画像セットの運用メモ
+- 読み込み順
+  - HTML → CSS → JS（ES Modules）
+- 定数/設定
+  - 前処理のデフォルト値（ROIマージン、長辺上限、閾値方式、Adaptive 窓サイズ等）は `js/constants.js`（無ければ新設）へ集約し、魔法数を散在させない。
+
+## 4. コーディング規約（横断）
+- 命名
+  - JS：lowerCamelCase、意味が伝わる語彙（略語乱用禁止）
+  - CSS：BEM（`block__elem--mod`）か Utility のどちらかに統一
+- コメント
+  - 原則日本語。関数の「入出力」「副作用」「重い処理の理由」を先頭 1 行で明記。
+- 構造
+  - 設定/定数・ドメインロジック（前処理）・I/O（カメラ/OCR）・UI 更新（デバッグ表示）を層分離。
+- 依存
+  - グローバル共有を最小化。前処理はできるだけ純粋関数に寄せ、必要な依存（canvas/context 等）を引数で受け取る。
+
+## 5. 実装ルール（プロジェクト固有）
+### 5.1 公開 I/F（必須）
+- `preprocessImage(source, options)`
+  - 入力 `source`：`HTMLImageElement | HTMLCanvasElement | Blob | string(base64/URL)` のいずれかを受け付ける（最終的に内部で Canvas に描画して統一）。
+  - 出力：`{ canvas, meta }`
+    - `canvas`：前処理済み `HTMLCanvasElement`（Tesseract.js に渡せる）
+    - `meta`（例）：
+      - `roi`: `{ x, y, width, height, marginApplied }`（最終値）
+      - `threshold`: `{ mode, value?, windowSize?, c? }`
+      - `timingsMs`: `{ total, steps: Record<string, number> }`（`performance.now()` で計測）
+      - `resize`: `{ applied, scale, longEdgeMax }`
+      - `warnings`: string[]（フォールバック/クランプ等の記録）
+      - `debugCanvases?`: 各段階の canvas（デバッグ時のみ・保持数制限）
+- エラー方針
+  - 例外は「呼び出し側がフォールバック判断できる」粒度で投げる/返す。
+  - 失敗時は `warnings` に理由を残し、可能なら「前処理を最小化して続行」する。
+
+### 5.2 パイプライン（必須）
+- 直列パイプラインを基本とし、順序を固定する（原則）：
+  1) ROI（切り抜き）
+  2) （任意）縮小（長辺上限）
+  3) グレースケール
+  4) （任意）コントラスト/明度補正
+  5) 二値化（`otsu` / `adaptive` / `auto`）
+  6) （任意）ノイズ除去（メディアン）
+  7) （任意）モルフォロジー（膨張/収縮：必要時のみ）
+- 内部関数例
+  - `applyPipeline(canvas, steps, options)`: steps 配列で段階を差し替え可能にする。
+  - 各ステップは「入力 canvas → 出力 canvas」を統一（原則 in-place 更新、必要時のみ新規 canvas）。
+
+### 5.3 ROI（最優先）
+- ガイド枠→撮影画像座標系への変換を最優先で安定させる。
+- 端末差を考慮
+  - `devicePixelRatio`、画面回転、video の letterbox（余白）を考慮し、表示領域（DOMRect）と実キャプチャ（captureCanvas）の対応を崩さない。
+- 実装ルール
+  - `mapGuideRectToImageRect(guideRect, videoDisplayRect, captureSize)` を用意し、スケール/オフセットを明示。
+  - ROI は必ず clamp（画像範囲外を切り捨て）。
+  - 文字欠け防止に ROI マージン（例：上下左右に数%）を options で指定し、最終 ROI を meta に記録。
+  - ROI 未指定のフォールバック：中央寄せ固定比率（“全表示部”寄り）を返し、将来拡張余地を残す。
+
+### 5.4 グレースケール・補正
+- グレースケール
+  - 輝度は `0.299R + 0.587G + 0.114B` を基本（軽量）。
+  - ROI 後に処理してコストを抑える。
+- コントラスト/明度
+  - 線形変換で最小実装（過補正で潰さないためデフォルトは控えめ）。
+  - 反射が強い場合は悪化する可能性があるため、options で ON/OFF 可能にする。
+
+### 5.5 二値化（Otsu / Adaptive / Auto）
+- Otsu（二値化）
+  - グレースケールのヒストグラム（0-255）から閾値を算出し、`meta.threshold.value` に保存。
+- Adaptive（局所閾値）
+  - 影/反射/照明ムラ対策。窓サイズ・C（減算値）を options 化。
+  - 計算量が大きいので、ROI 縮小（長辺上限）とセットで運用する。
+- Auto
+  - まず Otsu を試し、低信頼・結果不良（例：白/黒の偏りが極端）など簡易ルールで Adaptive に切替できる拡張点を用意。
+
+### 5.6 ノイズ除去・モルフォロジー（必要時のみ）
+- メディアン
+  - 基本は二値化前（グレースケール段階）での軽量ノイズ除去。
+  - radius は小さく、デフォルト OFF（低スペック端末配慮）。
+- モルフォロジー
+  - 二値化後のみ。`dilate/erode` と `iterations` の最小実装。
+  - デフォルト OFF。デバッグで効果が明確な場合のみ採用。
+
+### 5.7 OCR 連携（結合ルール）
+- OCR 実行前に必ず `preprocessImage` を呼ぶ。
+- Tesseract に渡す形式は統一（canvas もしくは Blob どちらかに寄せる）。
+- 失敗時フォールバック
+  - 前処理をスキップして OCR を試す、または `thresholdMode` を切替（`otsu`→`adaptive`）する。
+- `meta.timingsMs.total` を UI/ログで確認できるようにし、重いステップはデフォルト OFF/条件付きにする。
+
+## 6. UI/UX・入力操作の規約
+- デバッグトグル
+  - `debug=true`（例：クエリパラメータ、開発ビルドフラグ等）でのみ表示。
+  - 本番 UI を壊さない（通常時は DOM を極力増やさない/非表示）。
+- デバッグプレビュー（必須）
+  - 表示：元画像、ROI 後、グレースケール後、二値化後（＋任意：ノイズ除去後）
+  - 表示情報：ROI 座標、閾値、各ステップ処理時間
+- 画像/個人情報
+  - 代表画像を扱う場合は保存先・共有範囲に注意（個人情報が写る可能性）。
+
+## 7. パフォーマンス/品質
+- 目標
+  - 低スペック Android でもフリーズしない。
+  - 目安：前処理が数百 ms〜1.5 s 程度に収まる（環境差は meta で可視化）。
+- 実装指針
+  - ImageData の多重生成を避ける（必要最小限の get/putImageData）。
+  - 原則 in-place 更新（同一 canvas を使い回す）。
+  - 重い処理（Adaptive/メディアン/モルフォロジー）は「ROI 縮小」と「デフォルト OFF」を基本。
+  - ループ最適化：配列長を事前取得、TypedArray 前提、不要な再計算を避ける。
+  - デバッグ用に複数 canvas を保持する場合は「段階数上限」「都度破棄」を徹底。
+
+## 8. テスト/デバッグ（DoD）
+- ユニット（関数単位で確認できる形に）
+  - `cropToROI`：ROI 指定あり/なしで常に有効な canvas を返す、clamp/マージンが効く。
+  - `toGrayscale`：白黒化が目視で確認できる。
+  - `otsuThreshold`：閾値が算出され meta に残る。
+  - `binarize`：閾値適用で二値化される。
+- 結合
+  - 実機で「撮影 → 前処理 → OCR」が通る。
+  - 失敗時フォールバックで OCR が継続できる。
+- 受け入れ（Done）
+  - 前処理済み `canvas` を Tesseract.js へ渡せる。
+  - ROI がガイド枠と視覚的に一致し、数字表示部にフォーカスできる。
+  - 二値化後の可読性が十分で、主要ケースで「前処理なし」より OCR 抽出が体感で改善している。
+  - 低スペック端末でもフリーズせず、処理時間が許容範囲（meta で確認できる）。
+  - デバッグ ON/OFF で通常 UI を壊さない。
+
+## 9. リリース/更新運用
+- `todo.md/plan.md` 更新時
+  - 変更が入った数値（ROI 比率、閾値方式、長辺上限等）・対象ファイル・デバッグ手順を本ルールへ差分反映。
+- 回帰確認の足場
+  - 代表画像 5〜10 枚（良条件 2 / 悪条件 3 以上を含む）で、前処理結果（二値化）を短時間で目視確認できる手順を `README.md` に残す。
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部フレームワーク/重い画像処理ライブラリ導入。
+- ROI 前にフル解像度へ重い処理（Adaptive/メディアン）をかける。
+- ImageData を段階ごとに大量複製してメモリを圧迫する実装。
+- デバッグ UI を本番に常時露出させる（フラグで完全に隠す）。
+- 魔法数散在（閾値/窓サイズ/ROI 比率等は定数化）。
+
+## 11. コミット/PR 運用（任意）
+- 1コミット=1意図（ROI→二値化→デバッグ表示…のように小さく分割）。
+- PR には「目的/変更点/確認観点/スクショ（デバッグプレビュー）」を添付。
+
+---
+
+### 付録A: options 推奨スキーマ（例）
+- `roi`: `{ x, y, width, height }`（画像座標）
+- `roiFromGuide`: `{ guideRect, videoDisplayRect, captureSize, devicePixelRatio }`
+- `roiMarginRatio`: `0.02〜0.06`（上下左右）
+- `resizeLongEdgeMax`: `960`（端末性能により調整）
+- `grayscale`: `true`
+- `contrast`: `{ enabled: false, contrast: 0.1, brightness: 0 }`
+- `thresholdMode`: `'otsu' | 'adaptive' | 'auto'`（デフォルト `'otsu'`）
+- `adaptive`: `{ windowSize: 21, c: 7 }`
+- `median`: `{ enabled: false, radius: 1 }`
+- `morphology`: `{ enabled: false, op: 'dilate'|'erode', iterations: 1 }`
+- `debug`: `{ enabled: false, stages: ['source','roi','gray','bin','post'], maxKeep: 4 }`
+```
+
+```md
+# 生成ログ（要約）
+- 画像前処理の目的（ROI→二値化→ノイズ除去で OCR 精度改善）と、成果物（`preprocessImage`＋直列パイプライン＋デバッグ可視化）を Project Rules に反映。
+- ROI は「ガイド枠→撮影画像座標変換」を最優先にし、clamp/マージン/フォールバックを必須化。
+- 二値化は Otsu を基本、影/反射対策に Adaptive と `auto` 切替の拡張点を規定。
+- 低スペック端末向けに ImageData 多重生成回避・in-place 更新・重い処理のデフォルト OFF を明記（目安：数百ms〜1.5s）。
+- 未確定点（ROI を固定比率かユーザー調整か／機種差の揺れ）は、まず“全表示部”寄りの安全側 ROI＋拡張余地で整理。
+- 代表画像セットと README 手順を DoD/回帰テストとして組み込み。
+```
+

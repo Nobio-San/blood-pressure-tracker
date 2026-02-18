@@ -101,16 +101,11 @@
 
     /**
      * OCRを実行してテキストを認識
-     * 
+     * 前処理（ROI→グレースケール→二値化）を適用してからTesseractに渡す。失敗時は前処理スキップで継続。
+     *
      * @param {string|HTMLCanvasElement|Blob|ImageData} image - 認識対象画像
-     *        入力形式: URL(Base64含む) / HTMLCanvasElement / Blob / ImageData
-     * @param {Object} options - オプション設定
-     * @param {Function} options.onProgress - 進捗コールバック
-     * @returns {Promise<Object>} 認識結果
-     *          - rawText: 認識全文（加工しない）
-     *          - confidence: 平均信頼度（0〜100）
-     *          - data: Tesseractの生データ（デバッグ用）
-     * @throws {Error} OCR実行失敗時
+     * @param {Object} options - オプション（onProgress, preprocessOptions 等）
+     * @returns {Promise<Object>} 認識結果（rawText, confidence, data, preprocessMeta）
      */
     async function recognizeText(image, options = {}) {
         if (!image) {
@@ -118,24 +113,45 @@
         }
 
         try {
-            // ワーカー初期化（未初期化なら自動実行）
             await initOcr(options);
 
             console.log('[OCR] 文字認識を開始...');
             const startTime = performance.now();
 
-            // OCR実行
-            const result = await worker.recognize(image);
+            let inputForOcr = image;
+            let preprocessMeta = null;
+
+            if (window.ImagePreprocess && typeof window.ImagePreprocess.preprocessImage === 'function') {
+                try {
+                    const preprocessOpts = options.preprocessOptions || {};
+                    if (options.debugPreprocess) {
+                        preprocessOpts.debug = preprocessOpts.debug || {};
+                        preprocessOpts.debug.enabled = true;
+                    }
+                    const { canvas, meta } = await window.ImagePreprocess.preprocessImage(image, preprocessOpts);
+                    inputForOcr = canvas;
+                    preprocessMeta = meta;
+                    if (meta && meta.timingsMs && meta.timingsMs.total != null) {
+                        console.log(`[OCR] 前処理: ${meta.timingsMs.total}ms`);
+                    }
+                } catch (preprocessError) {
+                    console.warn('[OCR] 前処理をスキップして続行:', preprocessError.message);
+                    if (!preprocessMeta) preprocessMeta = { warnings: [preprocessError.message] };
+                }
+            }
+
+            const result = await worker.recognize(inputForOcr);
 
             const elapsedTime = Math.round(performance.now() - startTime);
             console.log(`[OCR] 認識完了（${elapsedTime}ms）`);
 
-            // 結果を整形して返す
-            return {
+            const out = {
                 rawText: result.data.text || '',
                 confidence: result.data.confidence || 0,
-                data: result.data // デバッグ用途で生データも含める
+                data: result.data
             };
+            if (preprocessMeta) out.preprocessMeta = preprocessMeta;
+            return out;
 
         } catch (error) {
             console.error('[OCR] 認識失敗:', error);
@@ -168,11 +184,18 @@
         }
     }
 
+    function getPreprocessImage() {
+        return window.ImagePreprocess && typeof window.ImagePreprocess.preprocessImage === 'function'
+            ? window.ImagePreprocess.preprocessImage
+            : null;
+    }
+
     // ===== 公開API =====
     window.OCR = {
         initOcr,
         recognizeText,
-        terminateOcr
+        terminateOcr,
+        get preprocessImage() { return getPreprocessImage(); }
     };
 
     console.log('[OCR] モジュール読み込み完了');

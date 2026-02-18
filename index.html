@@ -22,6 +22,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <!-- Tesseract.js CDN（バージョン固定: v5.0.3） -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+    <script src="js/constants.js" defer></script>
+    <script src="js/image-preprocess.js" defer></script>
     <script src="js/ocr.js?v=1" defer></script>
     <script src="js/sheets-api.js?v=3" defer></script>
     <script src="js/camera.js?v=3" defer></script>
@@ -345,6 +347,13 @@
         </div>
     </div>
     
+    <!-- Phase 3 Step 3-2: 前処理デバッグ表示（?debug=1 のときのみ表示） -->
+    <div id="preprocessDebugPanel" class="preprocess-debug" style="display: none;" aria-hidden="true">
+        <div class="preprocess-debug__title">前処理デバッグ</div>
+        <div id="preprocessDebugContent" class="preprocess-debug__content"></div>
+        <div id="preprocessDebugMeta" class="preprocess-debug__meta"></div>
+    </div>
+
     <!-- Phase 2 Step 2-4: 画像拡大モーダル -->
     <div id="imageZoomModal" class="image-zoom-modal" role="dialog" aria-modal="true" aria-labelledby="imageZoomModalTitle" style="display: none;">
         <div class="image-zoom-modal__overlay"></div>

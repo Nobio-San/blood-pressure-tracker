@@ -2164,6 +2164,8 @@ async function testOcrWithImage(imageBase64) {
     
     const btnOcrTest = document.getElementById('btnOcrTest');
     const originalText = btnOcrTest ? btnOcrTest.textContent : '';
+    const urlParams = new URLSearchParams(window.location.search);
+    const isDebugMode = urlParams.get('debug') === '1';
     
     try {
         if (btnOcrTest) {
@@ -2175,23 +2177,37 @@ async function testOcrWithImage(imageBase64) {
         
         const startTime = performance.now();
         
-        // OCR実行（進捗表示付き）
-        const result = await window.OCR.recognizeText(imageBase64, {
+        const ocrOptions = {
             onProgress: (info) => {
                 console.log(`[OCR Test] 進捗: ${info.status} - ${Math.round(info.progress * 100)}%`);
-            }
-        });
+            },
+            preprocessOptions: {},
+            debugPreprocess: isDebugMode
+        };
+        if (isDebugMode) {
+            ocrOptions.preprocessOptions.debug = { enabled: true, maxKeep: 5 };
+        }
+        
+        const result = await window.OCR.recognizeText(imageBase64, ocrOptions);
         
         const elapsedTime = Math.round(performance.now() - startTime);
         
         console.log('[OCR Test] 認識結果:', result);
         console.log(`[OCR Test] 処理時間: ${elapsedTime}ms`);
         
-        // 結果を表示
-        const message = `【OCR認識結果】\n` +
+        if (isDebugMode && result.preprocessMeta) {
+            showPreprocessDebugPanel(result.preprocessMeta);
+        } else {
+            hidePreprocessDebugPanel();
+        }
+        
+        let message = `【OCR認識結果】\n` +
                        `認識テキスト: "${result.rawText.trim()}"\n` +
                        `信頼度: ${Math.round(result.confidence)}%\n` +
                        `処理時間: ${elapsedTime}ms`;
+        if (result.preprocessMeta && result.preprocessMeta.timingsMs) {
+            message += `\n前処理: ${result.preprocessMeta.timingsMs.total}ms`;
+        }
         
         alert(message);
         showMessage('success', 'OCR認識が完了しました');
@@ -2200,11 +2216,54 @@ async function testOcrWithImage(imageBase64) {
         console.error('[OCR Test] エラー:', error);
         alert(`OCR認識に失敗しました\n${error.message}`);
         showMessage('error', 'OCR認識に失敗しました');
+        hidePreprocessDebugPanel();
     } finally {
         if (btnOcrTest) {
             btnOcrTest.textContent = originalText;
             btnOcrTest.disabled = false;
         }
+    }
+}
+
+function showPreprocessDebugPanel(meta) {
+    const panel = document.getElementById('preprocessDebugPanel');
+    const content = document.getElementById('preprocessDebugContent');
+    const metaEl = document.getElementById('preprocessDebugMeta');
+    if (!panel || !content || !metaEl) return;
+    content.innerHTML = '';
+    if (meta.debugCanvases && meta.debugCanvases.length > 0) {
+        meta.debugCanvases.forEach(function(item) {
+            const wrap = document.createElement('div');
+            wrap.className = 'preprocess-debug__item';
+            const label = document.createElement('span');
+            label.textContent = item.label;
+            label.style.display = 'block';
+            wrap.appendChild(label);
+            const c = document.createElement('canvas');
+            c.width = item.canvas.width;
+            c.height = item.canvas.height;
+            c.getContext('2d').drawImage(item.canvas, 0, 0);
+            c.style.maxWidth = '120px';
+            c.style.maxHeight = '80px';
+            wrap.appendChild(c);
+            content.appendChild(wrap);
+        });
+    }
+    let metaText = '';
+    if (meta.roi) metaText += 'ROI: ' + JSON.stringify(meta.roi) + '\n';
+    if (meta.threshold) metaText += '閾値: ' + JSON.stringify(meta.threshold) + '\n';
+    if (meta.timingsMs && meta.timingsMs.steps) metaText += 'ステップ(ms): ' + JSON.stringify(meta.timingsMs.steps) + '\n';
+    if (meta.warnings && meta.warnings.length) metaText += 'warnings: ' + meta.warnings.join(', ');
+    metaEl.textContent = metaText || '(なし)';
+    panel.style.display = 'block';
+    panel.setAttribute('aria-hidden', 'false');
+}
+
+function hidePreprocessDebugPanel() {
+    const panel = document.getElementById('preprocessDebugPanel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.setAttribute('aria-hidden', 'true');
     }
 }
 
