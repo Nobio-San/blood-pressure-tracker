@@ -1,0 +1,187 @@
+```md
+# ProjectRules.md（Cursor Project Rules 貼り付け用）
+
+## 1. 目的とスコープ
+- 目的：Tesseract.js のOCR結果（text + 可能なら words/lines のconfidence）から **血圧値（最高/最低）と脈拍** を高い再現性で抽出し、後続ステップ（自動入力）へ安全に渡す。
+- スコープ（やること）：
+  - `js/ocr.js` に「血圧・脈拍抽出ロジック」を実装（正規化 → 候補抽出 → 選別 → 結果スキーマ返却）。
+  - 抽出失敗・低信頼度・候補複数などを **warnings/errors** として機械可読に返す。
+  - 代表的OCRパターンに対する **自己テスト（fixtures）** を用意（console実行可能）。
+- 非スコープ（やらないこと）：
+  - OCR（撮影/前処理/認識実行）そのものの改善・モデル学習・サーバ処理。
+  - 画面UIの新規機能追加（ただし抽出結果をUIが扱えるI/F整備は行う）。
+  - 外部フレームワーク導入（React/Vue等）や重い依存追加。
+
+## 2. 技術スタック
+- 実装言語：HTML / CSS / JavaScript（本タスクの中核は JavaScript）
+- 実行環境：ブラウザ（PWA/バンドルなし想定）
+- 依存/前提：
+  - OCR結果として `result.data.text` を最低限受け取れること。
+  - 可能なら `result.data.words` / `result.data.lines` の confidence を利用（無い場合は text のみでフォールバック）。
+
+## 3. ディレクトリ/ファイル方針
+- 主要変更対象：
+  - `js/ocr.js`：抽出ロジック（関数群）＋ 開発用自己テスト（fixtures）
+- 推奨構成（既存構成に合わせて最小変更）：
+  - `js/ocr.js`
+    - `extractVitalsFromOcr(result, options)`（外部公開I/F）
+    - `normalizeOcrText(rawText, options)`（正規化）
+    - `extractBpCandidates(text, ocrMeta, options)` / `extractPulseCandidates(...)`（候補抽出）
+    - `validateVitals(vitals, options)`（範囲/関係チェック）
+    - `selectBestBpCandidate(candidates, options)` / `selectBestPulseCandidate(...)`（スコアリング・採用）
+    - `runExtractionSelfTest()`（fixtures駆動の簡易テスト）
+  - 定数は `js/ocr.js` 内の `const CONSTANTS = { ... }` に集約（別ファイルが既にあるならそちらへ移動可）。
+- 読み込み順：HTML → CSS → JS（既存の読み込みに従う）。
+
+## 4. コーディング規約（横断）
+- 命名：
+  - JS：lowerCamelCase、定数は UPPER_SNAKE_CASE でも可。
+  - CSS：BEM（`block__elem--mod`）か Utility のどちらかに統一（混在禁止）。
+- 構造：設定/定数・ドメインロジック（抽出）・I/O（Tesseract結果受け取り）・UI更新を層分離。
+- 純粋関数：
+  - 正規化/候補抽出/スコアリング/バリデーションは **副作用なし** を基本。
+  - consoleログ等の副作用は `debug` フラグで明示的にON/OFF。
+- エラーハンドリング：例外で落とさず **結果オブジェクト + errors/warnings** で返す。
+- コメント：原則日本語。関数の「入力/出力/副作用」を先頭1〜3行で明記。
+- 魔法数禁止：閾値・範囲・ボーナス/ペナルティは定数化し、調整点を1か所に集約。
+
+## 5. 実装ルール（プロジェクト固有：血圧/脈拍抽出）
+
+### 5.1 外部公開I/F（戻り値スキーマ）
+- 公開関数：`extractVitalsFromOcr(result, options)`
+- 入力：
+  - `result`: Tesseract.js の認識結果（最低限 `result.data.text`）。
+  - `options`（任意）：閾値/デバッグ等。未指定はデフォルト定数。
+- 戻り値（例：必ずこの形で返す。欠損は null）：
+  - `systolic: number|null`（最高）
+  - `diastolic: number|null`（最低）
+  - `pulse: number|null`（脈拍）
+  - `confidence: number`（0〜100、総合）
+  - `fieldConfidence: { systolic: number, diastolic: number, pulse: number }`（0〜100）
+  - `rawText: string`（元のOCR text）
+  - `normalizedText: string`（正規化後テキスト。debug用途だが常時入れてOK）
+  - `warnings: string[]`（例：`LOW_CONFIDENCE`, `MULTIPLE_CANDIDATES`, `SMALL_BP_GAP`）
+  - `errors: string[]`（例：`BP_PAIR_NOT_FOUND`, `PULSE_NOT_FOUND`, `VALIDATION_FAILED`）
+  - `debug?: { bpCandidates, pulseCandidates, evidence }`（`options.debug === true` のときのみ）
+
+### 5.2 正規化（normalizeOcrText）
+- 目的：OCRの揺れ（全角、改行、誤認識、区切り記号揺れ）を吸収し、後段の抽出を安定化。
+- 必須ルール：
+  - 全角数字→半角数字。
+  - 改行/タブは基本スペースに寄せ、連続スペースは1つへ圧縮。
+  - 区切り記号の統一：`／` `\` `|` `｜` `:` 等を `/` に寄せる（過補正しない）。
+  - 似た文字補正（数字近傍のみ適用して過補正を防ぐ）：
+    - `O/〇→0`, `I/l/|→1`, `S→5` など。
+- デバッグ容易性：`rawText` と `normalizedText` は常に保持し、抽出失敗時の原因追跡を可能にする。
+
+### 5.3 候補抽出（BP / Pulse）
+- 血圧（最高/最低）候補：
+  - 主要パターン：`(\d{2,3})\s*/\s*(\d{2,3})`
+  - 区切り欠落：`(\d{2,3})\s+(\d{2,3})`（血圧らしい近接2値）
+  - 連続トークン列：数字トークン列を作り、近接ペアを列挙（件数増加を抑えるため早期フィルタを必ず入れる）。
+  - 可能なら `words/lines` 由来の confidence・近接情報を候補メタとして保持：
+    - 例：`{ sys, dia, confSys, confDia, hasSeparator, hasLabel, proximityScore, evidence }`
+- 脈拍候補：
+  - まず採用候補の血圧数字（sys/dia）と同値・近接重複を除外。
+  - ラベル優先（近傍ボーナス）：`PUL`, `Pulse`, `HR`, `bpm`, `脈拍` など。
+  - ラベル無しフォールバック：範囲（40〜200）＋ confidence の高いもの。
+
+### 5.4 バリデーション（validateVitals）
+- 範囲（デフォルト。必要なら options で上書き可）：
+  - 最高：50〜250
+  - 最低：30〜150
+  - 脈拍：40〜200
+- 関係：`systolic > diastolic` を必須。
+  - 差が極端に小さい場合（例：`< 5`）は `warnings: SMALL_BP_GAP`。
+- 失敗時：例外を投げず `errors[]` に理由コードを積み、該当フィールドは `null`。
+
+### 5.5 スコアリング（候補が複数ある場合の選別）
+- 血圧ペアのスコア例（調整しやすいよう関数/定数化）：
+  - `score = confAvg`
+  - `+ bonus(hasSeparator)`（`XXX/YYY` を優先）
+  - `+ bonus(hasLabelNear)`（`SYS/DIA` 等が近ければ加点。文字誤認識も考慮して緩く）
+  - `+ bonus(reasonableGap)`（差が 20〜80 程度なら加点）
+  - `- penalty(outlier)`（範囲端に寄りすぎる/不自然な組）
+- 脈拍のスコア例：
+  - `score = conf + bonus(labelProximity) + bonus(inRange)`
+- 採用ルール：
+  - 最高スコアを採用。
+  - 僅差（例：上位2候補の差が一定未満）や候補多数（例：N>=5）の場合は `warnings: MULTIPLE_CANDIDATES` を付与。
+- 信頼度（0〜100）：
+  - `fieldConfidence`（各項目）は候補のconfidenceとルール適合度から算出。
+  - 総合 `confidence` は `fieldConfidence` の加重平均（BPを重め）で算出。
+  - 低信頼度閾値（例：70）を下回る場合は `warnings: LOW_CONFIDENCE`。
+  - TODO: 実機データに合わせて閾値（例：70）を最適化。
+
+### 5.6 失敗時の戻し方（UI連携）
+- 抽出不能：
+  - BPが取れない → `errors: BP_PAIR_NOT_FOUND`
+  - 脈拍が取れない → `errors: PULSE_NOT_FOUND`
+  - バリデーション不合格 → `errors: VALIDATION_FAILED`
+- UI側は `null` + `errors/warnings/confidence` を見て「再試行」「手動入力」へ自然に誘導できるようにする。
+
+## 6. UI/UX・入力操作の規約
+- 本タスクのUI要件は最小：
+  - 自己テストは `runExtractionSelfTest()` を **consoleから実行** できる形にする（本番UIからは呼ばない）。
+  - `options.debug` が true のときのみ詳細ログ/候補一覧を出す（通常は静かに動く）。
+- 表示/文言（UI側で使う想定）：
+  - `errors` は機械可読コードで返し、UIで日本語メッセージへマッピングする（ocr.js側で文言固定しない）。
+
+## 7. パフォーマンス/品質
+- ブラウザ上で軽量に：
+  - 文字列処理中心。重い探索（全組み合わせなど）は避け、近接ペア・早期フィルタで候補数を抑える。
+  - `words/lines` が無い場合も同等に動くフォールバック必須。
+- ログ：debug時のみ。通常時は処理時間とログ量を抑える。
+
+## 8. テスト/デバッグ（DoD）
+- 自己テスト（必須）：
+  - `fixtures` を 5〜10 ケース用意し、`runExtractionSelfTest()` で PASS/FAIL を出せる。
+  - fixtures例（最低限含める）：
+    - `"120/80 65"`
+    - `"SYS 120 DIA 80 PUL 65"`
+    - 全角混在（例：`１２０／８０ ６５`）
+    - `/`欠落（`"120 80 65"`）
+    - 改行分断（`"120\n80\n65"`）
+    - 誤認識（`O→0` 等）
+- 受け入れ基準（Done）：
+  - 空/異常入力でも例外で落ちず、スキーマ通り返る。
+  - 範囲・大小関係が機能し、範囲外は除外される。
+  - 複数候補があるケースで合理的に1つ選べ、僅差/多数は警告が付く。
+  - 抽出不能時に `errors` が入り、UIが分岐できる情報が揃う。
+
+## 9. リリース/更新運用
+- `todo.md / plan.md` 更新時は、以下の差分を本ルールと実装へ反映：
+  - 閾値（confidence/範囲/スコアリング定数）
+  - 追加されたOCRパターン（fixtures追加）
+  - 返却スキーマ（warnings/errorsコード）の変更
+- 実機データが増えたら、まず fixtures へ追加してからロジック調整（回帰防止）。
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部FW導入（React/Vue等）、重い依存追加。
+- 例外スローでUIを落とす設計（必ず errors/warnings で返す）。
+- setInterval乱用でループを回す（抽出は同期関数で完結）。
+- 魔法数の散在（範囲・閾値・スコア係数は定数に集約）。
+- 正規化の過補正（ラベル文字まで数字化しない：数字近傍限定などのガード必須）。
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（例：正規化追加、BP候補抽出、スコアリング調整、fixtures追加）。
+- PR説明（日本語）：目的 / 変更点 / 影響範囲 / 確認方法（fixtures実行結果）。
+
+---
+
+### 付録A: 言語別要点（本プロジェクトで使う範囲）
+- HTML：セマンティック/アクセシビリティ属性（本タスクはUI変更最小）。
+- CSS：BEM/合成プロパティ優先（本タスクはUI変更最小）。
+- JavaScript：ES Modules/純粋関数/副作用隔離、debugフラグでログ制御。
+```
+
+```md
+# 生成ログ（要約）
+- `js/ocr.js` に、OCRテキストから **最高/最低/脈拍** を抽出する関数群（正規化→候補抽出→選別→返却）を実装する前提でルール化。
+- 戻り値は `systolic/diastolic/pulse` + `confidence/fieldConfidence` + `warnings/errors` を必須とし、例外を投げずにUI連携できる設計に固定。
+- OCR誤認識（全角、改行、区切り揺れ、O→0等）を吸収する正規化と、範囲・大小関係でのバリデーションを明文化。
+- 複数候補が出る前提でスコアリング（separator/ラベル近接/妥当な差/confidence）を採用し、僅差・多数候補は警告。
+- fixtures（5〜10ケース）と `runExtractionSelfTest()` をDoDにし、実機差は fixtures 追加→定数調整で回帰を防ぐ。
+- 未確定点：実際の血圧計レイアウト・最適なconfidence閾値（TODOとして定数化し、実機データで調整）。
+```
+
