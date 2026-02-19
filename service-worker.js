@@ -96,6 +96,12 @@ self.addEventListener('fetch', (event) => {
         return;
     }
     
+    // http/https 以外のスキームはスキップ
+    // chrome-extension:// 等はCache APIが対応しないためエラーになる
+    if (!request.url.startsWith('http')) {
+        return;
+    }
+    
     // 外部API（Google Apps Script等）は常にネットワーク
     if (isExternalAPI(url)) {
         console.log('[SW] 外部API（キャッシュ対象外）:', url.href);
