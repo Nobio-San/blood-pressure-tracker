@@ -16,6 +16,11 @@ const MAX_DATA_RETENTION_DAYS = 365; // データ保持期間（日数）
 // Phase 2 Step 2-4: 画像プレビュー関連
 const IMAGE_PREVIEW_MAX_HEIGHT = 200; // サムネイル最大高さ（px）
 
+// Phase 3 Step 3-4: OCR確認UI定数
+const OCR_CONFIDENCE_HIGH = 90; // 高信頼度しきい値（緑/✓）
+const OCR_CONFIDENCE_MID  = 70; // 中信頼度しきい値（黄/!）
+const OCR_RETRY_LIMIT = 3;      // 再試行の上限回数
+
 // バリデーション範囲
 const VALIDATION = {
     systolic: { min: 50, max: 250 },
@@ -32,6 +37,14 @@ let bpChartInstance = null; // Chart.js インスタンス（描画/更新用）
 
 // Phase 2 Step 2-4: 画像状態管理
 let currentSelectedImage = null; // 現在選択中の画像データ { base64, width, height, mime, createdAt }
+
+// Phase 3 Step 3-4: OCR状態管理
+let ocrStatus = 'idle';   // 'idle' | 'running' | 'success' | 'failed'
+let ocrResult = null;     // 抽出結果 { systolic, diastolic, pulse, confidence, fieldConf, rawText, warnings }
+let ocrError  = null;     // エラー情報 { message, code }
+let ocrProgress = null;   // 進捗 0-1（取得できない場合は null）
+let imageToken = '';      // 画像破棄・撮り直し時に古い結果を無視するためのトークン
+let ocrRetryCount = 0;    // 再試行回数カウンタ
 
 // アプリの初期化
 document.addEventListener('DOMContentLoaded', () => {
@@ -119,6 +132,9 @@ function init() {
     
     // Phase 2 Step 2-4: 画像プレビュー機能の初期化
     initImagePreview();
+    
+    // Phase 3 Step 3-4: OCR確認UIの初期化
+    initOcrAutoRun();
     
     // 初期表示
     refreshRecordList();
@@ -1883,6 +1899,9 @@ function handleImageSelected(event) {
     // 成功メッセージを表示
     showMessage('success', '画像を読み込みました。画像を見ながら血圧値を入力してください。');
     
+    // Phase 3 Step 3-4: OCRを自動開始
+    startOcrForCurrentImage();
+    
     console.log('[ImagePreview] 画像プレビュー表示完了');
 }
 
@@ -1944,6 +1963,9 @@ function handleRemoveImage() {
     
     // プレビュー非表示
     hideImagePreview();
+    
+    // Phase 3 Step 3-4: OCR状態をリセット
+    resetOcrState();
     
     // 拡大モーダルも閉じる（開いている場合）
     closeImageZoom();
@@ -2299,6 +2321,441 @@ async function testOcrWithSampleImage() {
     
     // OCRテスト実行
     await testOcrWithImage(imageBase64);
+}
+
+/* =========================================
+   Phase 3 Step 3-4: OCR自動入力と確認UI
+   ========================================= */
+
+/**
+ * OCR確認UIのイベントを初期化
+ * 目的: バナーのアクションボタンと各inputの編集イベントを結線する
+ */
+function initOcrAutoRun() {
+    const btnOcrSave        = document.getElementById('btnOcrSave');
+    const btnOcrEdit        = document.getElementById('btnOcrEdit');
+    const btnOcrRetry       = document.getElementById('btnOcrRetry');
+    const btnOcrRetryFailed = document.getElementById('btnOcrRetryFailed');
+
+    if (btnOcrSave)        btnOcrSave.addEventListener('click', handleOcrSave);
+    if (btnOcrEdit)        btnOcrEdit.addEventListener('click', handleOcrEdit);
+    if (btnOcrRetry)       btnOcrRetry.addEventListener('click', handleOcrRetry);
+    if (btnOcrRetryFailed) btnOcrRetryFailed.addEventListener('click', handleOcrRetry);
+
+    // 各inputを編集したら自動入力マークを解除
+    ['systolic', 'diastolic', 'pulse'].forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        if (input) {
+            input.addEventListener('input', () => clearOcrAutoFill(fieldName));
+        }
+    });
+
+    console.log('[OCR AutoRun] 初期化完了');
+}
+
+/**
+ * 現在の画像でOCRを開始するエントリポイント
+ * 目的: handleImageSelected から呼ばれ、imageToken をリセットして runOcr を起動する
+ */
+async function startOcrForCurrentImage() {
+    if (!currentSelectedImage || !currentSelectedImage.base64) {
+        return;
+    }
+    if (!window.OCR || typeof window.OCR.recognizeText !== 'function') {
+        console.warn('[OCR AutoRun] OCRモジュールが読み込まれていません');
+        return;
+    }
+    if (ocrStatus === 'running') {
+        return;
+    }
+
+    const token = String(Date.now());
+    imageToken = token;
+    ocrRetryCount = 0;
+
+    await runOcr(token);
+}
+
+/**
+ * OCR実行（認識→抽出→フォーム反映→UI更新）
+ * 目的: ocrStatus を管理しながら OCR 処理の一連を実行する
+ * @param {string} token - 現在の imageToken（古い結果を破棄するため）
+ */
+async function runOcr(token) {
+    if (!currentSelectedImage || !currentSelectedImage.base64) {
+        return;
+    }
+
+    ocrStatus = 'running';
+    ocrError  = null;
+    ocrResult = null;
+    renderOcrUI();
+
+    const startTime = performance.now();
+    console.log('[OCR AutoRun] OCR開始');
+
+    try {
+        // DOM描画を先に済ませてからOCRを開始（UIフリーズ防止）
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        if (imageToken !== token) {
+            console.log('[OCR AutoRun] トークン不一致のため中断（起動前）');
+            return;
+        }
+
+        const image = currentSelectedImage.base64;
+        const ocrRaw = await window.OCR.recognizeText(image);
+
+        if (imageToken !== token) {
+            console.log('[OCR AutoRun] OCR完了したが画像が変わったため結果を破棄');
+            return;
+        }
+
+        const elapsed = Math.round(performance.now() - startTime);
+        console.log(`[OCR AutoRun] 認識完了 (${elapsed}ms)`);
+
+        const vitals = window.OCR.extractVitalsFromOcr({ data: ocrRaw.data });
+        console.log('[OCR AutoRun] 抽出結果:', {
+            systolic: vitals.systolic,
+            diastolic: vitals.diastolic,
+            pulse: vitals.pulse,
+            confidence: vitals.confidence
+        });
+
+        // systolic・diastolic が両方 null の場合は失敗扱い
+        if (vitals.systolic === null && vitals.diastolic === null) {
+            ocrStatus = 'failed';
+            ocrError  = { message: '血圧値を認識できませんでした', code: 'BP_PAIR_NOT_FOUND' };
+            ocrResult = null;
+        } else {
+            ocrStatus = 'success';
+            ocrResult = {
+                systolic:   vitals.systolic,
+                diastolic:  vitals.diastolic,
+                pulse:      vitals.pulse,
+                confidence: vitals.confidence,
+                fieldConf:  vitals.fieldConfidence,
+                rawText:    vitals.rawText,
+                warnings:   vitals.warnings
+            };
+            applyOcrResultToForm(ocrResult);
+        }
+
+    } catch (error) {
+        if (imageToken !== token) return;
+
+        console.error('[OCR AutoRun] 失敗:', error);
+        ocrStatus = 'failed';
+        ocrError  = { message: error.message, code: 'OCR_ERROR' };
+        ocrResult = null;
+    }
+
+    renderOcrUI();
+}
+
+/**
+ * OCR状態に応じてバナーとボタンを更新（UIの唯一の更新口）
+ * 目的: 状態変数 ocrStatus を見てDOMを一括更新する
+ */
+function renderOcrUI() {
+    const banner            = document.getElementById('ocrBanner');
+    const runningSection    = document.getElementById('ocrBannerRunning');
+    const successSection    = document.getElementById('ocrBannerSuccess');
+    const failedSection     = document.getElementById('ocrBannerFailed');
+    const btnOcrRetry       = document.getElementById('btnOcrRetry');
+    const btnOcrRetryFailed = document.getElementById('btnOcrRetryFailed');
+    const btnOcrSave        = document.getElementById('btnOcrSave');
+    const btnSubmit         = document.getElementById('btnSubmit');
+
+    if (!banner) return;
+
+    // 全セクションを一旦非表示
+    if (runningSection) runningSection.style.display = 'none';
+    if (successSection) successSection.style.display = 'none';
+    if (failedSection)  failedSection.style.display  = 'none';
+
+    if (ocrStatus === 'idle') {
+        banner.style.display = 'none';
+        if (btnSubmit) btnSubmit.disabled = false;
+        return;
+    }
+
+    banner.style.display = 'block';
+
+    if (ocrStatus === 'running') {
+        if (runningSection) runningSection.style.display = 'flex';
+        if (btnSubmit) btnSubmit.disabled = true;
+        if (btnOcrSave) btnOcrSave.disabled = true;
+
+    } else if (ocrStatus === 'success') {
+        if (successSection) successSection.style.display = 'block';
+        if (btnSubmit)  btnSubmit.disabled  = false;
+        if (btnOcrSave) btnOcrSave.disabled = false;
+
+        // 低信頼度（<70）なら再試行ボタンを表示しメッセージを変更
+        const hasLowConf = ocrResult && ocrResult.confidence < OCR_CONFIDENCE_MID;
+        if (btnOcrRetry) {
+            btnOcrRetry.style.display = hasLowConf ? 'inline-block' : 'none';
+            btnOcrRetry.disabled = ocrRetryCount >= OCR_RETRY_LIMIT;
+        }
+
+        const successMsg = document.getElementById('ocrBannerSuccessMsg');
+        if (successMsg) {
+            successMsg.textContent = hasLowConf
+                ? '! 信頼度が低い項目があります。内容を確認してください'
+                : '✓ 認識結果を確認してください';
+        }
+
+        // 信頼度バッジを更新
+        if (ocrResult && ocrResult.fieldConf) {
+            updateConfidenceBadge('systolic',  ocrResult.fieldConf.systolic,  ocrResult.systolic);
+            updateConfidenceBadge('diastolic', ocrResult.fieldConf.diastolic, ocrResult.diastolic);
+            updateConfidenceBadge('pulse',     ocrResult.fieldConf.pulse,     ocrResult.pulse);
+        }
+
+    } else if (ocrStatus === 'failed') {
+        if (failedSection) failedSection.style.display = 'block';
+        if (btnSubmit) btnSubmit.disabled = false;
+
+        // 失敗メッセージを状態に合わせて更新
+        const failedMsg = document.getElementById('ocrBannerFailedMsg');
+        if (failedMsg && ocrError) {
+            if (ocrError.code === 'BP_PAIR_NOT_FOUND') {
+                failedMsg.textContent = '✕ 血圧値を認識できませんでした。手動で入力するか再試行してください';
+            } else {
+                failedMsg.textContent = '✕ 自動読み取りに失敗しました。手動で入力するか再試行してください';
+            }
+        }
+
+        // 再試行回数が上限を超えた場合はボタンを変更
+        if (btnOcrRetryFailed) {
+            if (ocrRetryCount >= OCR_RETRY_LIMIT) {
+                btnOcrRetryFailed.disabled = true;
+                btnOcrRetryFailed.textContent = '再試行の上限に達しました（撮り直してください）';
+            } else {
+                btnOcrRetryFailed.disabled = false;
+                btnOcrRetryFailed.textContent = '再試行';
+            }
+        }
+    }
+}
+
+/**
+ * OCR結果をフォームへ自動入力
+ * 目的: 抽出した血圧値をinputに反映し、data-autofilled を付与する
+ * @param {Object} result - ocrResult（systolic/diastolic/pulse/fieldConf）
+ */
+function applyOcrResultToForm(result) {
+    ['systolic', 'diastolic', 'pulse'].forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        if (!input) return;
+
+        const value = result[fieldName];
+        if (value !== null && value !== undefined) {
+            input.value = String(value);
+            input.dataset.autofilled = 'true';
+            const conf = result.fieldConf ? result.fieldConf[fieldName] : result.confidence;
+            input.dataset.confidence = String(Math.round(conf || 0));
+        } else {
+            // null の場合はフィールドをクリアして自動入力マークを外す
+            input.value = '';
+            delete input.dataset.autofilled;
+            delete input.dataset.confidence;
+        }
+    });
+}
+
+/**
+ * 信頼度バッジを更新
+ * 目的: フィールドごとの信頼度に応じてバッジの文言・色クラスを切り替える
+ * @param {string} fieldName  - 'systolic' | 'diastolic' | 'pulse'
+ * @param {number} confidence - 0-100
+ * @param {number|null} value - OCR抽出値（null ならバッジを非表示）
+ */
+function updateConfidenceBadge(fieldName, confidence, value) {
+    const badge = document.getElementById(`${fieldName}-conf-badge`);
+    const input = document.getElementById(fieldName);
+
+    if (!badge) return;
+
+    const autofilledClasses = [
+        'form-field__input--autofilled-high',
+        'form-field__input--autofilled-mid',
+        'form-field__input--autofilled-low'
+    ];
+    const badgeClasses = [
+        'ocr-confidence-badge--high',
+        'ocr-confidence-badge--mid',
+        'ocr-confidence-badge--low',
+        'ocr-confidence-badge--edited'
+    ];
+
+    // 値が null なら非表示
+    if (value === null || value === undefined) {
+        badge.style.display = 'none';
+        badge.setAttribute('aria-hidden', 'true');
+        if (input) {
+            input.classList.remove(...autofilledClasses);
+        }
+        return;
+    }
+
+    badge.style.display = 'inline-flex';
+    badge.removeAttribute('aria-hidden');
+    badge.classList.remove(...badgeClasses);
+    if (input) input.classList.remove(...autofilledClasses);
+
+    // 編集済みの場合
+    const isEdited = input && input.dataset.autofilled !== 'true';
+    if (isEdited) {
+        badge.textContent = '✎ 編集済';
+        badge.classList.add('ocr-confidence-badge--edited');
+        return;
+    }
+
+    const pct = Math.round(confidence);
+    if (confidence > OCR_CONFIDENCE_HIGH) {
+        badge.textContent = `✓ ${pct}%`;
+        badge.classList.add('ocr-confidence-badge--high');
+        if (input) input.classList.add('form-field__input--autofilled-high');
+    } else if (confidence >= OCR_CONFIDENCE_MID) {
+        badge.textContent = `! ${pct}%`;
+        badge.classList.add('ocr-confidence-badge--mid');
+        if (input) input.classList.add('form-field__input--autofilled-mid');
+    } else {
+        badge.textContent = `✕ ${pct}%`;
+        badge.classList.add('ocr-confidence-badge--low');
+        if (input) input.classList.add('form-field__input--autofilled-low');
+    }
+}
+
+/**
+ * 手動編集時に該当フィールドの自動入力マークを解除
+ * 目的: input イベントで呼ばれ、自動入力装飾を通常状態へ戻す
+ * @param {string} fieldName - 'systolic' | 'diastolic' | 'pulse'
+ */
+function clearOcrAutoFill(fieldName) {
+    const input = document.getElementById(fieldName);
+    if (!input || input.dataset.autofilled !== 'true') return;
+
+    // 自動入力マークを解除
+    delete input.dataset.autofilled;
+    input.classList.remove(
+        'form-field__input--autofilled-high',
+        'form-field__input--autofilled-mid',
+        'form-field__input--autofilled-low'
+    );
+
+    // バッジを「編集済」に更新
+    if (ocrStatus === 'success' && ocrResult) {
+        const conf = ocrResult.fieldConf ? ocrResult.fieldConf[fieldName] : ocrResult.confidence;
+        updateConfidenceBadge(fieldName, conf, ocrResult[fieldName]);
+    }
+}
+
+/**
+ * OCR状態・フォームの自動入力装飾・バッジを全リセット
+ * 目的: 画像削除・撮り直し時に古いOCR結果を完全に消去する
+ */
+function resetOcrState() {
+    // 実行中のOCR結果を無効化するためトークンを更新
+    imageToken = String(Date.now());
+
+    ocrStatus     = 'idle';
+    ocrResult     = null;
+    ocrError      = null;
+    ocrProgress   = null;
+    ocrRetryCount = 0;
+
+    ['systolic', 'diastolic', 'pulse'].forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        if (input) {
+            delete input.dataset.autofilled;
+            delete input.dataset.confidence;
+            input.classList.remove(
+                'form-field__input--autofilled-high',
+                'form-field__input--autofilled-mid',
+                'form-field__input--autofilled-low'
+            );
+        }
+        const badge = document.getElementById(`${fieldName}-conf-badge`);
+        if (badge) {
+            badge.style.display = 'none';
+            badge.textContent = '';
+            badge.setAttribute('aria-hidden', 'true');
+        }
+    });
+
+    renderOcrUI();
+}
+
+/**
+ * 「そのまま記録」ボタン処理
+ * 目的: OCR実行中でなければ既存の記録ボタンをクリックして保存へ進む
+ */
+function handleOcrSave() {
+    if (ocrStatus === 'running') {
+        showMessage('warn', 'OCR処理中です。完了後に記録してください。');
+        return;
+    }
+    const btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit) {
+        btnSubmit.click();
+    }
+}
+
+/**
+ * 「修正する」ボタン処理
+ * 目的: 最初の入力フィールドへフォーカスしてキーボードを誘導する
+ */
+function handleOcrEdit() {
+    const systolicInput = document.getElementById('systolic');
+    if (systolicInput) {
+        systolicInput.focus();
+        systolicInput.select();
+    }
+}
+
+/**
+ * 「再試行」ボタン処理
+ * 目的: 未編集フィールドのみクリアして OCR を再実行する
+ */
+async function handleOcrRetry() {
+    if (ocrStatus === 'running') return;
+
+    if (ocrRetryCount >= OCR_RETRY_LIMIT) {
+        showMessage('warn', `再試行の上限（${OCR_RETRY_LIMIT}回）に達しました。撮り直してください。`);
+        return;
+    }
+
+    if (!currentSelectedImage || !currentSelectedImage.base64) {
+        showMessage('warn', '画像がありません。再撮影してください。');
+        return;
+    }
+
+    ocrRetryCount++;
+
+    // 未編集（data-autofilled が残っている）フィールドのみクリア
+    ['systolic', 'diastolic', 'pulse'].forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        if (input && input.dataset.autofilled === 'true') {
+            input.value = '';
+            delete input.dataset.autofilled;
+            delete input.dataset.confidence;
+            input.classList.remove(
+                'form-field__input--autofilled-high',
+                'form-field__input--autofilled-mid',
+                'form-field__input--autofilled-low'
+            );
+        }
+        const badge = document.getElementById(`${fieldName}-conf-badge`);
+        if (badge) badge.style.display = 'none';
+    });
+
+    const token = String(Date.now());
+    imageToken = token;
+
+    await runOcr(token);
 }
 
 // アプリ初期化時にOCRテストを初期化（既存のinit関数に追加）

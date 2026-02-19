@@ -1134,3 +1134,161 @@ select.form-field__input {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* =========================================
+   Phase 3 Step 3-4: OCR確認UI
+   ========================================= */
+
+/* OCRバナー全体 */
+.ocr-banner {
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* バナー共通セクション */
+.ocr-banner__section {
+    padding: 0.875rem 1rem;
+}
+
+/* 読み取り中セクション */
+.ocr-banner__section--running {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background-color: #e8f0fe;
+    border: 1px solid #c5d7f8;
+}
+
+/* 成功セクション */
+.ocr-banner__section--success {
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+}
+
+/* 失敗セクション */
+.ocr-banner__section--failed {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+}
+
+/* スピナーアニメーション */
+.ocr-banner__spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(74, 144, 226, 0.3);
+    border-top-color: #4a90e2;
+    border-radius: 50%;
+    animation: ocr-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes ocr-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* バナー内テキスト */
+.ocr-banner__text {
+    font-size: 1rem;
+    color: #1a3a6b;
+}
+
+/* バナーメッセージ */
+.ocr-banner__message {
+    margin: 0 0 0.625rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.ocr-banner__section--success .ocr-banner__message {
+    color: #155724;
+}
+
+.ocr-banner__section--failed .ocr-banner__message {
+    color: #721c24;
+}
+
+/* バナーアクションボタン群 */
+.ocr-banner__actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* =========================================
+   信頼度バッジ
+   ========================================= */
+.ocr-confidence-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+/* 高信頼度（>90） */
+.ocr-confidence-badge--high {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+/* 中信頼度（70〜90） */
+.ocr-confidence-badge--mid {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+/* 低信頼度（<70） */
+.ocr-confidence-badge--low {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+/* 編集済みバッジ */
+.ocr-confidence-badge--edited {
+    background-color: #e9ecef;
+    color: #6c757d;
+    opacity: 0.8;
+}
+
+/* =========================================
+   自動入力フィールドの装飾
+   ========================================= */
+
+/* 高信頼度（緑） */
+.form-field__input--autofilled-high {
+    background-color: #f0fff4;
+    border-color: #28a745;
+}
+
+/* 中信頼度（黄） */
+.form-field__input--autofilled-mid {
+    background-color: #fffdf0;
+    border-color: #ffc107;
+}
+
+/* 低信頼度（赤） */
+.form-field__input--autofilled-low {
+    background-color: #fff5f5;
+    border-color: #dc3545;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 480px) {
+    .ocr-banner__actions {
+        gap: 0.4rem;
+    }
+
+    .ocr-confidence-badge {
+        font-size: 0.75rem;
+        margin-left: 0.25rem;
+    }
+}

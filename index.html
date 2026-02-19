@@ -108,6 +108,28 @@
                 <div class="image-preview__hint">画像をタップして拡大表示できます</div>
             </div>
             
+            <!-- Phase 3 Step 3-4: OCR確認バナー -->
+            <div id="ocrBanner" class="ocr-banner" role="status" aria-live="polite" style="display: none;">
+                <div id="ocrBannerRunning" class="ocr-banner__section ocr-banner__section--running" style="display: none;">
+                    <span class="ocr-banner__spinner" aria-hidden="true"></span>
+                    <span id="ocrBannerLoadingText" class="ocr-banner__text">読み取り中…</span>
+                </div>
+                <div id="ocrBannerSuccess" class="ocr-banner__section ocr-banner__section--success" style="display: none;">
+                    <p id="ocrBannerSuccessMsg" class="ocr-banner__message">✓ 認識結果を確認してください</p>
+                    <div class="ocr-banner__actions">
+                        <button type="button" id="btnOcrSave" class="btn btn--primary" aria-label="OCR認識結果をそのまま記録する">そのまま記録</button>
+                        <button type="button" id="btnOcrEdit" class="btn btn--secondary" aria-label="入力内容を修正する">修正する</button>
+                        <button type="button" id="btnOcrRetry" class="btn btn--secondary" style="display: none;" aria-label="OCR認識を再試行する">再試行</button>
+                    </div>
+                </div>
+                <div id="ocrBannerFailed" class="ocr-banner__section ocr-banner__section--failed" style="display: none;">
+                    <p id="ocrBannerFailedMsg" class="ocr-banner__message">✕ 自動読み取りに失敗しました。手動で入力するか再試行してください</p>
+                    <div class="ocr-banner__actions">
+                        <button type="button" id="btnOcrRetryFailed" class="btn btn--secondary" aria-label="OCR認識を再試行する">再試行</button>
+                    </div>
+                </div>
+            </div>
+
             <form id="recordForm" class="record-form" novalidate>
                 <!-- 家族メンバー選択 -->
                 <div class="form-field">
@@ -136,9 +158,10 @@
                             inputmode="numeric"
                             placeholder="50〜250"
                             required
-                            aria-describedby="systolic-help"
-                        >
-                        <span id="systolic-help" class="form-field__help">mmHg (50〜250)</span>
+                        aria-describedby="systolic-help"
+                    >
+                    <span id="systolic-conf-badge" class="ocr-confidence-badge" style="display: none;" aria-hidden="true"></span>
+                    <span id="systolic-help" class="form-field__help">mmHg (50〜250)</span>
                     </div>
 
                     <div class="form-field">
@@ -154,9 +177,10 @@
                             inputmode="numeric"
                             placeholder="30〜150"
                             required
-                            aria-describedby="diastolic-help"
-                        >
-                        <span id="diastolic-help" class="form-field__help">mmHg (30〜150)</span>
+                        aria-describedby="diastolic-help"
+                    >
+                    <span id="diastolic-conf-badge" class="ocr-confidence-badge" style="display: none;" aria-hidden="true"></span>
+                    <span id="diastolic-help" class="form-field__help">mmHg (30〜150)</span>
                     </div>
                 </div>
 
@@ -176,6 +200,7 @@
                         required
                         aria-describedby="pulse-help"
                     >
+                    <span id="pulse-conf-badge" class="ocr-confidence-badge" style="display: none;" aria-hidden="true"></span>
                     <span id="pulse-help" class="form-field__help">bpm (40〜200)</span>
                 </div>
 
