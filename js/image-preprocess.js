@@ -341,6 +341,48 @@
     }
 
     /**
+     * ハイライト（映り込み）抑制：閾値以上の明るさを持つ画素をクランプする
+     * 反射光は極端に明るい白域として現れるため、二値化前に平坦化する
+     * @param {HTMLCanvasElement} canvas - グレースケール画像
+     * @param {number} ceiling - これ以上明るい画素を抑制する閾値（0-255、デフォルト220）
+     * @param {number} replaceValue - 抑制後の置換値（0-255、デフォルト180）
+     */
+    function suppressHighlights(canvas, ceiling, replaceValue) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        const data = ctx.getImageData(0, 0, w, h);
+        const d = data.data;
+        const ceil = ceiling != null ? ceiling : 220;
+        const rep = replaceValue != null ? replaceValue : 180;
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i] >= ceil) {
+                d[i] = d[i + 1] = d[i + 2] = rep;
+            }
+        }
+        ctx.putImageData(data, 0, 0);
+        return canvas;
+    }
+
+    /**
+     * 二値画像の白黒反転（暗背景→明背景に変換、Tesseract向け）
+     */
+    function invertImage(canvas) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        const data = ctx.getImageData(0, 0, w, h);
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+            d[i] = 255 - d[i];
+            d[i + 1] = 255 - d[i + 1];
+            d[i + 2] = 255 - d[i + 2];
+        }
+        ctx.putImageData(data, 0, 0);
+        return canvas;
+    }
+
+    /**
      * モルフォロジー（膨張/収縮）、二値画像前提
      */
     function morphology(canvas, op, iterations) {
@@ -422,6 +464,14 @@
         timings.grayscale = Math.round(performance.now() - t0);
         keepDebug('gray');
 
+        const hlOpt = options.highlightSuppress != null ? options.highlightSuppress : D.highlightSuppress;
+        if (hlOpt && hlOpt.enabled) {
+            t0 = performance.now();
+            suppressHighlights(canvas, hlOpt.ceiling, hlOpt.replaceValue);
+            timings.highlightSuppress = Math.round(performance.now() - t0);
+            keepDebug('hl');
+        }
+
         const contrastOpt = options.contrast != null ? options.contrast : D.contrast;
         if (contrastOpt && contrastOpt.enabled) {
             t0 = performance.now();
@@ -438,28 +488,37 @@
 
         const mode = options.thresholdMode || D.thresholdMode || 'otsu';
         let thresholdValue = null;
-        t0 = performance.now();
-        if (mode === 'otsu' || mode === 'auto') {
-            const id = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
-            thresholdValue = otsuThreshold(id);
-            binarize(canvas, thresholdValue);
-        } else if (mode === 'adaptive') {
-            const ad = options.adaptive != null ? options.adaptive : D.adaptive;
-            adaptiveThreshold(canvas, ad && ad.windowSize, ad && ad.c);
-            if (meta.threshold) meta.threshold.mode = 'adaptive';
+        if (mode !== 'none') {
+            t0 = performance.now();
+            if (mode === 'otsu' || mode === 'auto') {
+                const id = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+                thresholdValue = otsuThreshold(id);
+                binarize(canvas, thresholdValue);
+            } else if (mode === 'adaptive') {
+                const ad = options.adaptive != null ? options.adaptive : D.adaptive;
+                adaptiveThreshold(canvas, ad && ad.windowSize, ad && ad.c);
+                if (meta.threshold) meta.threshold.mode = 'adaptive';
+            }
+            timings.binarize = Math.round(performance.now() - t0);
         }
-        timings.binarize = Math.round(performance.now() - t0);
         if (meta.threshold) {
             meta.threshold.mode = mode;
             meta.threshold.value = thresholdValue;
         }
-        keepDebug('bin');
+        if (mode !== 'none') keepDebug('bin');
 
         const morphOpt = options.morphology != null ? options.morphology : D.morphology;
-        if (morphOpt && morphOpt.enabled && morphOpt.iterations) {
+        if (mode !== 'none' && morphOpt && morphOpt.enabled && morphOpt.iterations) {
             t0 = performance.now();
             morphology(canvas, morphOpt.op || 'dilate', morphOpt.iterations);
             timings.morphology = Math.round(performance.now() - t0);
+            keepDebug('morph');
+        }
+
+        if (mode !== 'none' && options.invert) {
+            t0 = performance.now();
+            invertImage(canvas);
+            timings.invert = Math.round(performance.now() - t0);
             keepDebug('post');
         }
 

@@ -18,9 +18,10 @@ const CAMERA_STORAGE_KEY = 'bp:lastCapturedImage'; // sessionStorage保存キー
 // Phase 2 Step 2-3: 撮影ガイド機能関連
 const GUIDE_CONFIG = {
     // ガイド枠サイズ（コンテナに対する割合）
-    frameWidthRatio: 0.88,          // 幅: コンテナの88%
-    frameHeightRatio: 0.50,         // 高さ: コンテナの50%
-    frameAspect: null,              // 縦横比（TODO: 血圧計表示部の実寸が判明次第設定）
+    // 数値列のみに絞る縦長枠（OMRONロゴ・ラベル・余白を除外してOCR精度向上）
+    frameWidthRatio: 0.50,          // 幅: コンテナの50%
+    frameHeightRatio: 0.52,         // 高さ: コンテナの52%
+    frameAspect: 0.45,              // 縦横比（幅/高さ=0.45で縦長の数値列枠）
     
     // マスク設定
     maskColor: 'rgba(0, 0, 0, 0.45)', // マスクの濃度
@@ -31,7 +32,7 @@ const GUIDE_CONFIG = {
     frameBorderRadius: 8,           // 枠の角丸（px）
     
     // テキスト設定
-    guideText: '血圧計の表示部分を枠内に合わせてください',
+    guideText: '数値（最高・最低血圧・脈拍）のみを枠内に合わせてください',
     hintText: '明るい場所で、反射に注意してください',
     textFontSize: 18,               // フォントサイズ（px）
     textColor: '#ffffff',           // テキストの色

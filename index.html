@@ -24,7 +24,8 @@
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
     <script src="js/constants.js" defer></script>
     <script src="js/image-preprocess.js" defer></script>
-    <script src="js/ocr.js?v=1" defer></script>
+    <script src="js/seven-segment.js" defer></script>
+    <script src="js/ocr.js?v=2" defer></script>
     <script src="js/sheets-api.js?v=3" defer></script>
     <script src="js/camera.js?v=3" defer></script>
     <script src="js/app.js?v=3" defer></script>
@@ -124,6 +125,7 @@
                 </div>
                 <div id="ocrBannerFailed" class="ocr-banner__section ocr-banner__section--failed" style="display: none;">
                     <p id="ocrBannerFailedMsg" class="ocr-banner__message">✕ 自動読み取りに失敗しました。手動で入力するか再試行してください</p>
+                    <p id="ocrCaptureHints" class="ocr-banner__hint" style="display: none;"></p>
                     <div class="ocr-banner__actions">
                         <button type="button" id="btnOcrRetryFailed" class="btn btn--secondary" aria-label="OCR認識を再試行する">再試行</button>
                     </div>
@@ -377,6 +379,14 @@
         <div class="preprocess-debug__title">前処理デバッグ</div>
         <div id="preprocessDebugContent" class="preprocess-debug__content"></div>
         <div id="preprocessDebugMeta" class="preprocess-debug__meta"></div>
+    </div>
+
+    <!-- Phase 3 Step 3-5: OCR多重試行デバッグパネル（?debug=1 のときのみ表示） -->
+    <div id="ocrDebugPanel" class="ocr-debug" style="display: none;" aria-hidden="true">
+        <details class="ocr-debug__wrapper" open>
+            <summary class="ocr-debug__title">OCR多重試行デバッグ（開発用）</summary>
+            <div id="ocrDebugContent" class="ocr-debug__content"></div>
+        </details>
     </div>
 
     <!-- Phase 2 Step 2-4: 画像拡大モーダル -->

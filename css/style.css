@@ -1292,3 +1292,79 @@ select.form-field__input {
         margin-left: 0.25rem;
     }
 }
+
+/* Phase 3 Step 3-5: OCR多重試行デバッグパネル */
+.ocr-debug {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 50vh;
+    overflow-y: auto;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-size: 0.78rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    z-index: 9000;
+    border-top: 2px solid #e94560;
+}
+.ocr-debug__wrapper {
+    padding: 0.5rem;
+}
+.ocr-debug__title {
+    font-weight: bold;
+    color: #e94560;
+    cursor: pointer;
+    padding: 0.25rem 0;
+}
+.ocr-debug__content {
+    padding: 0.5rem 0;
+}
+.ocr-debug__summary {
+    padding: 0.4rem 0.5rem;
+    background: #16213e;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+}
+.ocr-debug__attempt {
+    padding: 0.4rem 0.5rem;
+    margin-bottom: 0.4rem;
+    border-left: 3px solid #555;
+    background: #0f3460;
+    border-radius: 0 4px 4px 0;
+}
+.ocr-debug__attempt--selected {
+    border-left-color: #00d2ff;
+    background: #1a3a5c;
+}
+.ocr-debug__attempt-header {
+    font-weight: bold;
+    color: #53d8fb;
+    margin-bottom: 0.2rem;
+}
+.ocr-debug__attempt--selected .ocr-debug__attempt-header {
+    color: #00d2ff;
+}
+.ocr-debug__thumb {
+    max-width: 200px;
+    max-height: 80px;
+    background: #000;
+    border: 1px solid #444;
+    margin: 0.2rem 0;
+    display: block;
+}
+.ocr-debug__details {
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #b0b0b0;
+    line-height: 1.4;
+}
+
+/* 撮影ヒント */
+.ocr-banner__hint {
+    font-size: 0.82rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+    font-style: italic;
+}

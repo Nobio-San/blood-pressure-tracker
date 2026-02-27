@@ -45,6 +45,7 @@ let ocrError  = null;     // エラー情報 { message, code }
 let ocrProgress = null;   // 進捗 0-1（取得できない場合は null）
 let imageToken = '';      // 画像破棄・撮り直し時に古い結果を無視するためのトークン
 let ocrRetryCount = 0;    // 再試行回数カウンタ
+let imageIsGuideCropped = false; // ガイド枠クロップ済みフラグ
 
 // アプリの初期化
 document.addEventListener('DOMContentLoaded', () => {
@@ -1711,9 +1712,53 @@ function initCamera() {
             
             console.log('[Camera] キャプチャ成功', captureResult);
             
+            // Step 1.5: ガイド枠領域にクロップ（object-fit: cover 補正込み）
+            let processBlob = captureResult.blob;
+            imageIsGuideCropped = false;
+            try {
+                const { getGuideROI } = window.CameraModule;
+                const previewContainer = document.getElementById('cameraPreviewContainer');
+                if (getGuideROI && previewContainer &&
+                    window.ImagePreprocess && window.ImagePreprocess.mapGuideRectToImageRect) {
+                    const roi = getGuideROI();
+                    if (roi.w > 0 && roi.h > 0) {
+                        const containerRect = previewContainer.getBoundingClientRect();
+                        const guideRect = {
+                            x: roi.x * containerRect.width,
+                            y: roi.y * containerRect.height,
+                            width: roi.w * containerRect.width,
+                            height: roi.h * containerRect.height,
+                        };
+                        const imageRect = window.ImagePreprocess.mapGuideRectToImageRect(
+                            guideRect,
+                            containerRect,
+                            { width: captureResult.width, height: captureResult.height }
+                        );
+                        if (imageRect.width > 10 && imageRect.height > 10) {
+                            const cropCanvas = document.createElement('canvas');
+                            cropCanvas.width = imageRect.width;
+                            cropCanvas.height = imageRect.height;
+                            cropCanvas.getContext('2d').drawImage(
+                                cameraCanvas,
+                                imageRect.x, imageRect.y, imageRect.width, imageRect.height,
+                                0, 0, imageRect.width, imageRect.height
+                            );
+                            processBlob = await new Promise(resolve =>
+                                cropCanvas.toBlob(resolve, 'image/jpeg', 0.85)
+                            );
+                            imageIsGuideCropped = true;
+                            console.log('[Camera] ガイド枠クロップ完了', imageRect);
+                        }
+                    }
+                }
+            } catch (cropErr) {
+                console.warn('[Camera] ガイド枠クロップ失敗。フル画像で続行:', cropErr.message);
+                processBlob = captureResult.blob;
+            }
+            
             // Step 2: 画像処理（縮小・圧縮・向き補正）
             const processResult = await processCapturedPhoto({
-                capturedBlob: captureResult.blob,
+                capturedBlob: processBlob,
                 previewImg: photoPreview
             });
             
@@ -2404,28 +2449,41 @@ async function runOcr(token) {
         }
 
         const image = currentSelectedImage.base64;
-        const ocrRaw = await window.OCR.recognizeText(image);
+        const ocrDebug = window.OCR && window.OCR.isDebugMode ? window.OCR.isDebugMode() : false;
+        const ocrOptions = { debug: ocrDebug };
+        if (imageIsGuideCropped && currentSelectedImage.width && currentSelectedImage.height) {
+            ocrOptions.roi = { x: 0, y: 0, width: currentSelectedImage.width, height: currentSelectedImage.height };
+        }
+        const ocrRaw = await window.OCR.recognizeText(image, ocrOptions);
 
         if (imageToken !== token) {
             console.log('[OCR AutoRun] OCR完了したが画像が変わったため結果を破棄');
             return;
         }
 
-        const elapsed = Math.round(performance.now() - startTime);
-        console.log(`[OCR AutoRun] 認識完了 (${elapsed}ms)`);
+        const elapsed = ocrRaw.totalElapsedMs || Math.round(performance.now() - startTime);
+        console.log(`[OCR AutoRun] 認識完了 (${elapsed}ms, attempts=${ocrRaw.attempts ? ocrRaw.attempts.length : 1})`);
 
-        const vitals = window.OCR.extractVitalsFromOcr({ data: ocrRaw.data });
+        const vitals = ocrRaw.vitals || window.OCR.extractVitalsFromOcr({ data: ocrRaw.data });
         console.log('[OCR AutoRun] 抽出結果:', {
             systolic: vitals.systolic,
             diastolic: vitals.diastolic,
             pulse: vitals.pulse,
-            confidence: vitals.confidence
+            confidence: vitals.confidence,
+            confidenceLevel: vitals.confidenceLevel,
+            needsReview: vitals.needsReview,
+            selectedAttempt: ocrRaw.selectedAttemptId
         });
+
+        if (ocrDebug && ocrRaw.attempts) {
+            renderOcrDebugPanel(ocrRaw);
+        }
 
         // systolic・diastolic が両方 null の場合は失敗扱い
         if (vitals.systolic === null && vitals.diastolic === null) {
             ocrStatus = 'failed';
-            ocrError  = { message: '血圧値を認識できませんでした', code: 'BP_PAIR_NOT_FOUND' };
+            var failCode = (ocrRaw.errorCode === 'TIMEOUT') ? 'TIMEOUT' : 'BP_PAIR_NOT_FOUND';
+            ocrError  = { message: failCode === 'TIMEOUT' ? 'タイムアウトしました' : '血圧値を認識できませんでした', code: failCode };
             ocrResult = null;
         } else {
             ocrStatus = 'success';
@@ -2436,7 +2494,9 @@ async function runOcr(token) {
                 confidence: vitals.confidence,
                 fieldConf:  vitals.fieldConfidence,
                 rawText:    vitals.rawText,
-                warnings:   vitals.warnings
+                warnings:   vitals.warnings,
+                needsReview:    vitals.needsReview,
+                confidenceLevel: vitals.confidenceLevel
             };
             applyOcrResultToForm(ocrResult);
         }
@@ -2492,18 +2552,22 @@ function renderOcrUI() {
         if (btnSubmit)  btnSubmit.disabled  = false;
         if (btnOcrSave) btnOcrSave.disabled = false;
 
-        // 低信頼度（<70）なら再試行ボタンを表示しメッセージを変更
-        const hasLowConf = ocrResult && ocrResult.confidence < OCR_CONFIDENCE_MID;
+        // needsReview / 低信頼度なら再試行ボタンを表示しメッセージを変更
+        const showReview = ocrResult && (ocrResult.needsReview || ocrResult.confidence < OCR_CONFIDENCE_MID);
         if (btnOcrRetry) {
-            btnOcrRetry.style.display = hasLowConf ? 'inline-block' : 'none';
+            btnOcrRetry.style.display = showReview ? 'inline-block' : 'none';
             btnOcrRetry.disabled = ocrRetryCount >= OCR_RETRY_LIMIT;
         }
 
         const successMsg = document.getElementById('ocrBannerSuccessMsg');
         if (successMsg) {
-            successMsg.textContent = hasLowConf
-                ? '! 信頼度が低い項目があります。内容を確認してください'
-                : '✓ 認識結果を確認してください';
+            if (ocrResult && ocrResult.confidenceLevel === 'high' && !ocrResult.needsReview) {
+                successMsg.textContent = '✓ 高信頼度で認識しました。確認してください';
+            } else if (showReview) {
+                successMsg.textContent = '! 信頼度が低い項目があります。内容を確認してください';
+            } else {
+                successMsg.textContent = '✓ 認識結果を確認してください';
+            }
         }
 
         // 信頼度バッジを更新
@@ -2520,10 +2584,22 @@ function renderOcrUI() {
         // 失敗メッセージを状態に合わせて更新
         const failedMsg = document.getElementById('ocrBannerFailedMsg');
         if (failedMsg && ocrError) {
-            if (ocrError.code === 'BP_PAIR_NOT_FOUND') {
+            if (ocrError.code === 'TIMEOUT') {
+                failedMsg.textContent = '✕ 読み取りがタイムアウトしました。撮り直すか手動で入力してください';
+            } else if (ocrError.code === 'BP_PAIR_NOT_FOUND') {
                 failedMsg.textContent = '✕ 血圧値を認識できませんでした。手動で入力するか再試行してください';
             } else {
                 failedMsg.textContent = '✕ 自動読み取りに失敗しました。手動で入力するか再試行してください';
+            }
+        }
+
+        // 撮影ヒントを表示
+        var OC_HINTS = window.OCR_CONSTANTS && window.OCR_CONSTANTS.CAPTURE_HINTS;
+        if (OC_HINTS && OC_HINTS.length > 0) {
+            var hintEl = document.getElementById('ocrCaptureHints');
+            if (hintEl) {
+                hintEl.textContent = OC_HINTS[Math.floor(Math.random() * OC_HINTS.length)];
+                hintEl.style.display = 'block';
             }
         }
 
@@ -2661,11 +2737,12 @@ function resetOcrState() {
     // 実行中のOCR結果を無効化するためトークンを更新
     imageToken = String(Date.now());
 
-    ocrStatus     = 'idle';
-    ocrResult     = null;
-    ocrError      = null;
-    ocrProgress   = null;
-    ocrRetryCount = 0;
+    ocrStatus          = 'idle';
+    ocrResult          = null;
+    ocrError           = null;
+    ocrProgress        = null;
+    ocrRetryCount      = 0;
+    imageIsGuideCropped = false;
 
     ['systolic', 'diastolic', 'pulse'].forEach(fieldName => {
         const input = document.getElementById(fieldName);
@@ -2686,7 +2763,130 @@ function resetOcrState() {
         }
     });
 
+    hideOcrDebugPanel();
     renderOcrUI();
+}
+
+/**
+ * OCR多重試行のデバッグパネルを描画
+ * 目的: debug=1 のとき、各attemptの前処理画像・rawText・スコアを表示する
+ * @param {Object} ocrRaw - recognizeText の返却オブジェクト
+ */
+function renderOcrDebugPanel(ocrRaw) {
+    var panel = document.getElementById('ocrDebugPanel');
+    var content = document.getElementById('ocrDebugContent');
+    if (!panel || !content) return;
+
+    content.innerHTML = '';
+
+    var summary = document.createElement('div');
+    summary.className = 'ocr-debug__summary';
+    summary.textContent = '試行数: ' + ocrRaw.attempts.length +
+        ' / 所要時間: ' + ocrRaw.totalElapsedMs + 'ms' +
+        ' / 採用: ' + (ocrRaw.selectedAttemptId || '-') +
+        (ocrRaw.errorCode ? ' / エラー: ' + ocrRaw.errorCode : '');
+    content.appendChild(summary);
+
+    ocrRaw.attempts.forEach(function(attempt) {
+        var card = document.createElement('div');
+        card.className = 'ocr-debug__attempt';
+        if (attempt.id === ocrRaw.selectedAttemptId) {
+            card.classList.add('ocr-debug__attempt--selected');
+        }
+
+        var header = document.createElement('div');
+        header.className = 'ocr-debug__attempt-header';
+        header.textContent = attempt.id +
+            ' [score=' + (attempt.totalScore || 0) + ']' +
+            (attempt.error ? ' ERROR: ' + attempt.error : '') +
+            ' (' + (attempt.elapsedMs || 0) + 'ms)';
+        card.appendChild(header);
+
+        if (attempt.error) {
+            content.appendChild(card);
+            return;
+        }
+
+        if (attempt.debugCanvas && attempt.debugCanvas instanceof HTMLCanvasElement) {
+            var thumb = document.createElement('canvas');
+            var tw = Math.min(200, attempt.debugCanvas.width);
+            var th = Math.round(tw * attempt.debugCanvas.height / attempt.debugCanvas.width);
+            thumb.width = tw;
+            thumb.height = th;
+            thumb.getContext('2d').drawImage(attempt.debugCanvas, 0, 0, tw, th);
+            thumb.className = 'ocr-debug__thumb';
+            card.appendChild(thumb);
+        }
+
+        var details = document.createElement('div');
+        details.className = 'ocr-debug__details';
+
+        var rawLine = 'raw: "' + (attempt.rawText || '').substring(0, 80) + '"';
+        var scoreLine = 'OCR conf=' + (attempt.confidence || 0).toFixed(0) +
+            ' / extract=' + (attempt.scoreBreakdown ? attempt.scoreBreakdown.extractScore : '-') +
+            ' / total=' + (attempt.totalScore || 0);
+        var vitalsLine = attempt.vitals
+            ? 'SYS=' + (attempt.vitals.systolic !== null ? attempt.vitals.systolic : '-') +
+              ' DIA=' + (attempt.vitals.diastolic !== null ? attempt.vitals.diastolic : '-') +
+              ' PUL=' + (attempt.vitals.pulse !== null ? attempt.vitals.pulse : '-') +
+              ' level=' + (attempt.vitals.confidenceLevel || '-')
+            : 'vitals: -';
+
+        details.textContent = rawLine + '\n' + scoreLine + '\n' + vitalsLine;
+        card.appendChild(details);
+
+        content.appendChild(card);
+    });
+
+    // JSONダウンロードボタン
+    var dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'btn btn--secondary btn--small';
+    dlBtn.textContent = 'ログをJSON保存';
+    dlBtn.addEventListener('click', function() {
+        var logData = {
+            timestamp: new Date().toISOString(),
+            selectedAttemptId: ocrRaw.selectedAttemptId,
+            totalElapsedMs: ocrRaw.totalElapsedMs,
+            errorCode: ocrRaw.errorCode,
+            attempts: ocrRaw.attempts.map(function(a) {
+                return {
+                    id: a.id, preprocessName: a.preprocessName,
+                    resolutionLevel: a.resolutionLevel, tesseract: a.tesseract,
+                    rawText: a.rawText, confidence: a.confidence,
+                    totalScore: a.totalScore, scoreBreakdown: a.scoreBreakdown,
+                    vitals: a.vitals ? {
+                        systolic: a.vitals.systolic, diastolic: a.vitals.diastolic,
+                        pulse: a.vitals.pulse, confidence: a.vitals.confidence,
+                        confidenceLevel: a.vitals.confidenceLevel, needsReview: a.vitals.needsReview
+                    } : null,
+                    elapsedMs: a.elapsedMs, error: a.error || null
+                };
+            })
+        };
+        var blob = new Blob([JSON.stringify(logData, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'ocr-debug-' + Date.now() + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+    content.appendChild(dlBtn);
+
+    panel.style.display = 'block';
+}
+
+/**
+ * OCRデバッグパネルを非表示にする
+ */
+function hideOcrDebugPanel() {
+    var panel = document.getElementById('ocrDebugPanel');
+    if (panel) {
+        panel.style.display = 'none';
+        var content = document.getElementById('ocrDebugContent');
+        if (content) content.innerHTML = '';
+    }
 }
 
 /**
