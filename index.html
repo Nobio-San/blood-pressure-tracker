@@ -27,7 +27,6 @@
     <script src="js/seven-segment.js" defer></script>
     <script src="js/ocr.js?v=2" defer></script>
     <script src="js/sheets-api.js?v=3" defer></script>
-    <script src="js/camera.js?v=3" defer></script>
     <script src="js/app.js?v=3" defer></script>
     
     <!-- Service Worker登録 -->
@@ -80,12 +79,8 @@
     <main id="app">
         <section class="form-section">
             <h2 class="form-section__title">血圧を記録する</h2>
-            <!-- カメラで撮影ボタン -->
-            <div class="camera-trigger">
-                <button type="button" id="btnOpenCamera" class="btn btn--camera" aria-label="カメラで血圧計の画面を撮影">
-                    📷 カメラで撮影
-                </button>
-                <!-- 開発時のみ: OCRテストボタン（URLパラメータ ?debug=1 で表示） -->
+            <!-- 開発時のみ: OCRテストボタン（URLパラメータ ?debug=1 で表示） -->
+            <div class="debug-tools">
                 <button type="button" id="btnOcrTest" class="btn btn--secondary" style="display: none;" aria-label="OCR機能をテスト">
                     🔍 OCRテスト
                 </button>
@@ -323,57 +318,6 @@
         </section>
     </main>
 
-    <!-- カメラモーダル -->
-    <div id="cameraModal" class="camera-modal" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle" style="display: none;">
-        <div class="camera-modal__overlay"></div>
-        <div class="camera-modal__content">
-            <h2 id="cameraModalTitle" class="camera-modal__title">カメラで撮影</h2>
-            
-            <!-- カメラプレビュー領域 -->
-            <div id="cameraPreviewContainer" class="camera-modal__preview">
-                <video id="cameraVideo" class="camera-modal__video" playsinline autoplay muted aria-label="カメラプレビュー"></video>
-                <canvas id="cameraCanvas" class="camera-modal__canvas" style="display: none;" aria-hidden="true"></canvas>
-            </div>
-            
-            <!-- 撮影画像プレビュー領域 -->
-            <div id="photoPreviewContainer" class="camera-modal__preview" style="display: none;">
-                <img id="photoPreview" class="camera-modal__photo" alt="撮影した画像" />
-            </div>
-            
-            <!-- エラー/注意表示領域 -->
-            <div id="cameraError" class="camera-modal__error" role="alert" aria-live="assertive" style="display: none;"></div>
-            
-            <!-- ローディング表示 -->
-            <div id="cameraLoading" class="camera-modal__loading" role="status" aria-live="polite" style="display: none;">
-                <span class="camera-modal__loading-spinner" aria-hidden="true"></span>
-                <span id="loadingText">カメラを起動中...</span>
-            </div>
-            
-            <!-- カメラプレビュー時の操作ボタン -->
-            <div id="cameraActions" class="camera-modal__actions">
-                <button type="button" id="btnCameraCapture" class="btn btn--primary btn--large" aria-label="シャッターを切って撮影">
-                    📸 シャッター
-                </button>
-                <button type="button" id="btnCameraClose" class="btn btn--secondary btn--large" aria-label="カメラを閉じる">
-                    ✕ 閉じる
-                </button>
-            </div>
-            
-            <!-- 画像プレビュー時の操作ボタン -->
-            <div id="photoActions" class="camera-modal__actions" style="display: none;">
-                <button type="button" id="btnRetake" class="btn btn--secondary btn--large" aria-label="もう一度撮影する">
-                    🔄 再撮影
-                </button>
-                <button type="button" id="btnRotate" class="btn btn--secondary btn--large" aria-label="画像を90度回転">
-                    🔄 回転
-                </button>
-                <button type="button" id="btnUsePhoto" class="btn btn--primary btn--large" aria-label="この画像を使用する">
-                    ✓ この画像を使う
-                </button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Phase 3 Step 3-2: 前処理デバッグ表示（?debug=1 のときのみ表示） -->
     <div id="preprocessDebugPanel" class="preprocess-debug" style="display: none;" aria-hidden="true">
         <div class="preprocess-debug__title">前処理デバッグ</div>

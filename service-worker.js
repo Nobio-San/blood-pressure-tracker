@@ -4,7 +4,7 @@
  */
 
 // キャッシュ名（バージョン管理用）
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `bp-cache-${CACHE_VERSION}`;
 
 // プリキャッシュ対象（アプリシェル: 最小限から開始）
@@ -13,7 +13,6 @@ const PRECACHE_URLS = [
     './index.html',
     './css/style.css',
     './js/app.js',
-    './js/camera.js',
     './js/sheets-api.js',
     './manifest.json',
     './icons/icon-192.png',
