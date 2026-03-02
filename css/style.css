@@ -1,46 +1,114 @@
-/* リセットCSS */
+/* =========================================
+   Step4-1: デザイントークン（CSS変数）
+   ========================================= */
+:root {
+    /* Colors */
+    --color-bg: #f5f5f5;
+    --color-surface: #ffffff;
+    --color-text: #333333;
+    --color-muted: #666666;
+    --color-muted-light: #999999;
+    --color-primary: #4a90e2;
+    --color-primary-hover: #357abd;
+    --color-primary-active: #2863a8;
+    --color-primary-contrast: #ffffff;
+    --color-border: #dddddd;
+    --color-border-light: #e0e0e0;
+    --color-danger: #d9534f;
+    --color-danger-hover: #c9302c;
+    --color-warning: #ffc107;
+    --color-success: #28a745;
+    --color-focus: rgba(74, 144, 226, 0.5);
+    --color-focus-ring: #4a90e2;
+    /* Typography */
+    --font-sans: "Noto Sans JP", system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+    --font-size-xl: 20px;
+    --line-height: 1.6;
+    --font-weight-regular: 400;
+    --font-weight-semibold: 600;
+    /* Spacing */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    /* Radius / Shadow */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+    /* Touch target */
+    --tap-size: 48px;
+    /* z-index（既存） */
+    --z-video: 0;
+    --z-guide: 10;
+    --z-controls: 20;
+}
+
+/* =========================================
+   Base: リセット / タイポグラフィ / レイアウト
+   ========================================= */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
-/* 基本スタイル */
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    color: #333;
-    background-color: #f5f5f5;
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height);
+    color: var(--color-text);
+    background-color: var(--color-bg);
 }
 
 /* ヘッダー */
 header {
-    background-color: #4a90e2;
-    color: white;
-    padding: 1rem;
+    background-color: var(--color-primary);
+    color: var(--color-primary-contrast);
+    padding: var(--space-4);
     text-align: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 header h1 {
-    font-size: 1.5rem;
-    font-weight: 600;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+}
+
+.header__icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.header__icon svg {
+    width: 1.5em;
+    height: 1.5em;
 }
 
 /* オフライン通知バナー */
 .offline-banner {
     display: none;
-    background-color: #ffc107;
-    color: #333;
-    padding: 0.5rem 1rem;
+    background-color: var(--color-warning);
+    color: var(--color-text);
+    padding: var(--space-2) var(--space-4);
     text-align: center;
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
     position: sticky;
     top: 0;
     z-index: 1000;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 .offline-banner--visible {
@@ -48,42 +116,55 @@ header h1 {
 }
 
 .offline-banner__icon {
-    margin-right: 0.5rem;
+    margin-right: var(--space-2);
 }
 
 /* メインコンテナ */
 #app {
     max-width: 560px;
     margin: 0 auto;
-    padding: 1rem;
+    padding: var(--space-4);
 }
 
 /* =========================================
-   フォームセクション
+   Components: カード / セクション
    ========================================= */
-.form-section {
-    background-color: #ffffff;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+.form-section,
+.chart-section,
+.records-section {
+    background-color: var(--color-surface);
+    border-radius: var(--radius-md);
+    padding: var(--space-6);
+    margin-top: var(--space-6);
+    box-shadow: var(--shadow-md);
 }
 
-.form-section__title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 1.5rem;
+.form-section {
+    margin-top: 0;
+}
+
+.form-section__title,
+.chart-section__title,
+.records-section__title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
+    margin-bottom: var(--space-6);
+}
+
+.records-section__title {
+    margin: 0;
 }
 
 /* =========================================
-   メッセージ表示
+   Components: メッセージ（alert相当）
    ========================================= */
 .message {
     display: none;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    border-radius: 4px;
-    font-size: 0.875rem;
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-4);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
     line-height: 1.5;
 }
 
@@ -109,57 +190,66 @@ header h1 {
 }
 
 /* =========================================
-   フォームフィールド
+   Components: フォームフィールド
    ========================================= */
 .record-form {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: var(--space-6);
 }
 
 .form-field {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
 }
 
 .form-field__label {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #333;
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
 }
 
 .form-field__input {
     width: 100%;
-    min-height: 44px;
-    padding: 0.75rem;
-    font-size: 1rem;
-    color: #333;
-    background-color: #fff;
-    border: 2px solid #ddd;
-    border-radius: 4px;
-    transition: border-color 0.2s ease;
+    min-height: var(--tap-size);
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--font-size-base);
+    color: var(--color-text);
+    background-color: var(--color-surface);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .form-field__input:focus {
     outline: none;
-    border-color: #4a90e2;
-    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+    border-color: var(--color-focus-ring);
+    box-shadow: 0 0 0 3px var(--color-focus);
 }
 
 .form-field__input:focus-visible {
     outline: none;
-    border-color: #4a90e2;
-    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+    border-color: var(--color-focus-ring);
+    box-shadow: 0 0 0 3px var(--color-focus);
 }
 
 .form-field__input::placeholder {
-    color: #999;
+    color: var(--color-muted-light);
 }
 
 .form-field__help {
-    font-size: 0.875rem;
-    color: #666;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+}
+
+.form-field__input.is-invalid {
+    border-color: var(--color-danger);
+}
+
+.form-field__error {
+    font-size: var(--font-size-sm);
+    color: var(--color-danger);
 }
 
 /* セレクトボックス */
@@ -167,7 +257,7 @@ select.form-field__input {
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23333' d='M1.41 0L6 4.59 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 0.75rem center;
+    background-position: right var(--space-3) center;
     padding-right: 2.5rem;
 }
 
@@ -175,32 +265,32 @@ select.form-field__input {
 .form-field-group {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: var(--space-6);
 }
 
 /* =========================================
-   ボタン
+   Components: ボタン
    ========================================= */
 .form-actions {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    margin-top: 0.5rem;
+    gap: var(--space-4);
+    margin-top: var(--space-2);
 }
 
 .btn {
-    min-height: 44px;
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
-    font-weight: 600;
+    min-height: var(--tap-size);
+    padding: var(--space-3) var(--space-6);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
 }
 
 .btn:focus-visible {
-    outline: 3px solid rgba(74, 144, 226, 0.5);
+    outline: 3px solid var(--color-focus);
     outline-offset: 2px;
 }
 
@@ -211,70 +301,56 @@ select.form-field__input {
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
 }
 
-/* プライマリボタン（記録する） */
+@media (prefers-reduced-motion: reduce) {
+    .btn:active {
+        transform: none;
+    }
+}
+
 .btn--primary {
-    background-color: #4a90e2;
-    color: #fff;
+    background-color: var(--color-primary);
+    color: var(--color-primary-contrast);
 }
 
-.btn--primary:hover {
-    background-color: #357abd;
+.btn--primary:hover:not(:disabled) {
+    background-color: var(--color-primary-hover);
 }
 
-.btn--primary:active {
-    background-color: #2863a8;
+.btn--primary:active:not(:disabled) {
+    background-color: var(--color-primary-active);
 }
 
-/* セカンダリボタン（クリア） */
 .btn--secondary {
-    background-color: #f5f5f5;
-    color: #666;
-    border: 2px solid #ddd;
+    background-color: var(--color-bg);
+    color: var(--color-muted);
+    border: 2px solid var(--color-border);
 }
 
-.btn--secondary:hover {
+.btn--secondary:hover:not(:disabled) {
     background-color: #e8e8e8;
     border-color: #ccc;
 }
 
-.btn--secondary:active {
+.btn--secondary:active:not(:disabled) {
     background-color: #ddd;
 }
 
-/* 小さいボタン（再同期ボタン等） */
 .btn--small {
-    min-height: 36px;
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
+    min-height: var(--tap-size);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--font-size-sm);
     white-space: nowrap;
-}
-
-/* =========================================
-   グラフセクション
-   ========================================= */
-.chart-section {
-    background-color: #ffffff;
-    border-radius: 8px;
-    padding: 1.5rem;
-    margin-top: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.chart-section__title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 1.5rem;
 }
 
 /* グラフフィルター */
 .chart-filter {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
 }
 
 .chart-filter .form-field {
@@ -285,59 +361,42 @@ select.form-field__input {
 .chart-container {
     width: 100%;
     height: 280px;
-    margin-top: 1rem;
+    margin-top: var(--space-4);
     position: relative;
 }
 
 /* 空表示（グラフデータなし） */
 .chart-empty {
     text-align: center;
-    padding: 3rem 1rem;
-    color: #666;
+    padding: var(--space-8) var(--space-4);
+    color: var(--color-muted);
 }
 
 .chart-empty p {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
 }
 
 .chart-empty__hint {
-    font-size: 0.875rem;
-    color: #999;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted-light);
 }
 
-/* =========================================
-   記録一覧セクション
-   ========================================= */
-.records-section {
-    background-color: #ffffff;
-    border-radius: 8px;
-    padding: 1.5rem;
-    margin-top: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
+/* 記録一覧セクション */
 .records-section__header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1.5rem;
-    gap: 1rem;
+    margin-bottom: var(--space-6);
+    gap: var(--space-4);
     flex-wrap: wrap;
-}
-
-.records-section__title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #333;
-    margin: 0;
 }
 
 /* フィルタ・件数表示 */
 .records-filter {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
 }
 
 .records-filter .form-field {
@@ -345,64 +404,64 @@ select.form-field__input {
 }
 
 .records-count {
-    font-size: 0.875rem;
-    color: #666;
-    padding: 0.5rem 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    padding: var(--space-2) 0;
 }
 
 /* 空状態 */
 .records-empty {
     text-align: center;
-    padding: 3rem 1rem;
-    color: #666;
+    padding: var(--space-8) var(--space-4);
+    color: var(--color-muted);
 }
 
 .records-empty p {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
 }
 
 .records-empty__hint {
-    font-size: 0.875rem;
-    color: #999;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted-light);
 }
 
 /* 一覧リスト */
 .records-list {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-4);
 }
 
 /* テーブル表示用 */
 .table-scroll {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    margin: 0 -1.5rem;
-    padding: 0 1.5rem;
+    margin: 0 calc(-1 * var(--space-6));
+    padding: 0 var(--space-6);
 }
 
 .records-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
 }
 
 .records-table th,
 .records-table td {
-    padding: 0.75rem 0.5rem;
+    padding: var(--space-3) var(--space-2);
     text-align: left;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--color-border-light);
 }
 
 .records-table th {
-    font-weight: 600;
-    color: #333;
-    background-color: #f5f5f5;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
+    background-color: var(--color-bg);
     white-space: nowrap;
 }
 
 .records-table td {
-    color: #666;
+    color: var(--color-muted);
 }
 
 .records-table tbody tr:hover {
@@ -415,43 +474,43 @@ select.form-field__input {
 
 /* カード表示用（モバイル優先） */
 .record-card {
-    background-color: #fff;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    padding: 1rem;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .record-card__header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--color-border-light);
 }
 
 .record-card__datetime {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: #333;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
 }
 
 .record-card__member {
-    font-size: 0.875rem;
-    color: #666;
-    padding: 0.25rem 0.5rem;
-    background-color: #f5f5f5;
-    border-radius: 3px;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    padding: var(--space-1) var(--space-2);
+    background-color: var(--color-bg);
+    border-radius: var(--radius-sm);
 }
 
 /* 未同期バッジ */
 .record-card__badge {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 3px;
-    font-weight: 600;
+    font-size: var(--font-size-sm);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    font-weight: var(--font-weight-semibold);
 }
 
 .record-card__badge--unsynced {
@@ -463,29 +522,29 @@ select.form-field__input {
 .record-card__body {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .record-card__item {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
 }
 
 .record-card__label {
-    font-size: 0.75rem;
-    color: #999;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted-light);
 }
 
 .record-card__value {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #333;
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
 }
 
 .record-card__value--bp {
-    font-size: 1.125rem;
-    color: #4a90e2;
+    font-size: var(--font-size-lg);
+    color: var(--color-primary);
 }
 
 .record-card__footer {
@@ -495,21 +554,21 @@ select.form-field__input {
 
 /* 削除ボタン */
 .btn--danger {
-    min-height: 44px;
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    background-color: #fff;
-    color: #d9534f;
-    border: 2px solid #d9534f;
-    border-radius: 4px;
+    min-height: var(--tap-size);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    background-color: var(--color-surface);
+    color: var(--color-danger);
+    border: 2px solid var(--color-danger);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
 }
 
-.btn--danger:hover {
-    background-color: #d9534f;
-    color: #fff;
+.btn--danger:hover:not(:disabled) {
+    background-color: var(--color-danger);
+    color: var(--color-primary-contrast);
 }
 
 .btn--danger:focus-visible {
@@ -517,55 +576,66 @@ select.form-field__input {
     outline-offset: 2px;
 }
 
-.btn--danger:active {
+.btn--danger:active:not(:disabled) {
     transform: translateY(1px);
-    background-color: #c9302c;
-    border-color: #c9302c;
+    background-color: var(--color-danger-hover);
+    border-color: var(--color-danger-hover);
 }
 
 /* =========================================
-   レスポンシブ対応
+   Utilities: アクセシビリティ
+   ========================================= */
+.sr-only,
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* =========================================
+   Responsive: ブレークポイント
    ========================================= */
 
-/* タブレット以上 */
+/* タブレット以上 (768px) */
 @media (min-width: 768px) {
     header h1 {
-        font-size: 2rem;
+        font-size: var(--font-size-xl);
     }
-    
+
     #app {
-        padding: 2rem;
+        padding: var(--space-8);
     }
 
-    .form-section {
-        padding: 2rem;
-    }
-
+    .form-section,
+    .chart-section,
     .records-section {
-        padding: 2rem;
+        padding: var(--space-8);
     }
 
-    /* 血圧フィールドを横並びに */
     .form-field-group {
         flex-direction: row;
-        gap: 1rem;
+        gap: var(--space-4);
     }
 
     .form-field-group .form-field {
         flex: 1;
     }
 
-    /* ボタンを横並びに */
     .form-actions {
         flex-direction: row;
-        gap: 1rem;
+        gap: var(--space-4);
     }
 
     .form-actions .btn {
         flex: 1;
     }
 
-    /* フィルタを横並びに */
     .records-filter {
         flex-direction: row;
         align-items: center;
@@ -575,7 +645,6 @@ select.form-field__input {
         max-width: 200px;
     }
 
-    /* グラフフィルタを横並びに */
     .chart-filter {
         flex-direction: row;
         align-items: flex-start;
@@ -585,16 +654,16 @@ select.form-field__input {
         max-width: 200px;
     }
 
-    /* グラフコンテナの高さをタブレット以上で拡大 */
     .chart-container {
         height: 320px;
     }
 }
 
-/* デスクトップ */
+/* デスクトップ (1024px+) */
 @media (min-width: 1024px) {
     #app {
-        padding: 2.5rem;
+        max-width: 960px;
+        padding: var(--space-8);
     }
 }
 
@@ -762,6 +831,13 @@ select.form-field__input {
     }
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .camera-modal__loading-spinner,
+    .ocr-banner__spinner {
+        animation-duration: 2s;
+    }
+}
+
 /* 操作ボタン */
 .camera-modal__actions {
     display: flex;
@@ -801,13 +877,6 @@ select.form-field__input {
    Phase 2 Step 2-3: 撮影ガイド機能
    ========================================= */
 
-/* CSS変数でz-index管理 */
-:root {
-    --z-video: 0;
-    --z-guide: 10;
-    --z-controls: 20;
-}
-
 /* ガイドオーバーレイ */
 .camera-guide {
     position: absolute;
@@ -826,8 +895,8 @@ select.form-field__input {
 /* ガイド枠 */
 .camera-guide__frame {
     position: absolute;
-    border: 3px solid #4a90e2;
-    border-radius: 8px;
+    border: 3px solid var(--color-primary);
+    border-radius: var(--radius-md);
     box-sizing: border-box;
     /* マスク効果（枠外を暗くする） */
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
@@ -908,9 +977,9 @@ select.form-field__input {
 }
 
 .image-preview__label {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: #4a90e2;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-primary);
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -924,20 +993,20 @@ select.form-field__input {
 .image-preview__remove {
     background: none;
     border: none;
-    padding: 0.25rem;
+    padding: var(--space-2);
     cursor: pointer;
-    color: #999;
+    color: var(--color-muted-light);
     transition: color 0.2s ease, transform 0.1s ease;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    width: 32px;
-    height: 32px;
+    min-width: var(--tap-size);
+    min-height: var(--tap-size);
 }
 
 .image-preview__remove:hover {
-    color: #d9534f;
+    color: var(--color-danger);
     background-color: rgba(217, 83, 79, 0.1);
 }
 
@@ -946,7 +1015,7 @@ select.form-field__input {
 }
 
 .image-preview__remove:focus-visible {
-    outline: 2px solid #4a90e2;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
 }
 
@@ -1035,7 +1104,7 @@ select.form-field__input {
 .image-zoom-modal__close {
     background: none;
     border: none;
-    padding: 0.5rem;
+    padding: var(--space-2);
     cursor: pointer;
     color: #ccc;
     transition: color 0.2s ease, transform 0.1s ease;
@@ -1043,6 +1112,8 @@ select.form-field__input {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
+    min-width: var(--tap-size);
+    min-height: var(--tap-size);
 }
 
 .image-zoom-modal__close:hover {
@@ -1055,7 +1126,7 @@ select.form-field__input {
 }
 
 .image-zoom-modal__close:focus-visible {
-    outline: 2px solid #4a90e2;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
 }
 
@@ -1224,7 +1295,7 @@ select.form-field__input {
     display: inline-flex;
     align-items: center;
     gap: 0.2em;
-    font-size: 0.8rem;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     padding: 0.15em 0.5em;
     border-radius: 4px;
@@ -1288,7 +1359,7 @@ select.form-field__input {
     }
 
     .ocr-confidence-badge {
-        font-size: 0.75rem;
+        font-size: var(--font-size-sm);
         margin-left: 0.25rem;
     }
 }
