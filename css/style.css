@@ -381,6 +381,142 @@ select.form-field__input {
     color: var(--color-muted-light);
 }
 
+/* Phase 4 Step 4-2: グラフコントロール（セグメントボタン） */
+.chart-control__segments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.chart-control__btn {
+    min-height: var(--tap-size);
+    min-width: 48px;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-muted);
+    background-color: var(--color-bg);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.chart-control__btn:hover {
+    background-color: #e8e8e8;
+    border-color: #ccc;
+}
+
+.chart-control__btn[aria-pressed="true"] {
+    background-color: var(--color-primary);
+    color: var(--color-primary-contrast);
+    border-color: var(--color-primary);
+}
+
+.chart-control__btn:focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+.chart-type-field.chart-type-field--disabled .chart-control__btn {
+    opacity: 0.6;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 目標ライン設定 */
+.chart-target-field {
+    border-top: 1px solid var(--color-border-light);
+    padding-top: var(--space-4);
+}
+
+.chart-target__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-2);
+}
+
+.chart-target__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+}
+
+.chart-target__toggle input[type="checkbox"] {
+    width: 1.2em;
+    height: 1.2em;
+    accent-color: var(--color-primary);
+}
+
+.chart-target__inputs {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.chart-target__input {
+    width: 100%;
+    max-width: 80px;
+}
+
+.chart-target__sep {
+    color: var(--color-muted);
+}
+
+.chart-target__unit {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+}
+
+/* 統計情報カード */
+.stats-cards {
+    margin-top: var(--space-6);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--color-border-light);
+}
+
+.stats-cards__count {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    margin-bottom: var(--space-4);
+}
+
+.stats-cards__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-4);
+}
+
+.stats-card {
+    background-color: var(--color-bg);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-light);
+}
+
+.stats-card__label {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    margin-bottom: var(--space-1);
+}
+
+.stats-card__value {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
+}
+
+.stats-card__sub {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted-light);
+    margin-top: var(--space-1);
+}
+
 /* 記録一覧セクション */
 .records-section__header {
     display: flex;

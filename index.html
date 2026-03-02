@@ -238,11 +238,11 @@
         <section class="chart-section">
             <h2 class="chart-section__title">血圧推移グラフ</h2>
             
-            <!-- グラフ用フィルター -->
+            <!-- グラフ用フィルター・コントロール -->
             <div class="chart-filter">
                 <div class="form-field">
                     <label for="chartMemberFilter" class="form-field__label">表示対象</label>
-                    <select id="chartMemberFilter" name="chartMemberFilter" class="form-field__input">
+                    <select id="chartMemberFilter" name="chartMemberFilter" class="form-field__input" aria-label="グラフ表示対象のメンバーを選択">
                         <option value="all">全メンバー</option>
                         <option value="自分">自分</option>
                         <option value="配偶者">配偶者</option>
@@ -251,29 +251,53 @@
                     </select>
                 </div>
                 
-                <!-- 期間選択 -->
+                <!-- 期間選択（7/30/90/全期間） -->
                 <div class="form-field">
-                    <label for="chartStartDate" class="form-field__label">開始日</label>
-                    <input 
-                        type="date" 
-                        id="chartStartDate" 
-                        name="chartStartDate" 
-                        class="form-field__input"
-                        aria-describedby="chartStartDate-help"
-                    >
-                    <span id="chartStartDate-help" class="form-field__help">グラフ表示の開始日</span>
+                    <span class="form-field__label" id="chartRangeLabel">期間</span>
+                    <div class="chart-control__segments" role="group" aria-labelledby="chartRangeLabel">
+                        <button type="button" class="chart-control__btn" data-range="7d" aria-pressed="false" aria-label="7日間">7日</button>
+                        <button type="button" class="chart-control__btn" data-range="30d" aria-pressed="true" aria-label="30日間">30日</button>
+                        <button type="button" class="chart-control__btn" data-range="90d" aria-pressed="false" aria-label="90日間">90日</button>
+                        <button type="button" class="chart-control__btn" data-range="all" aria-pressed="false" aria-label="全期間">全期間</button>
+                    </div>
                 </div>
                 
+                <!-- 分析ビュー切替（推移/時間帯/曜日） -->
                 <div class="form-field">
-                    <label for="chartEndDate" class="form-field__label">終了日</label>
-                    <input 
-                        type="date" 
-                        id="chartEndDate" 
-                        name="chartEndDate" 
-                        class="form-field__input"
-                        aria-describedby="chartEndDate-help"
-                    >
-                    <span id="chartEndDate-help" class="form-field__help">グラフ表示の終了日</span>
+                    <span class="form-field__label" id="chartViewLabel">分析</span>
+                    <div class="chart-control__segments" role="group" aria-labelledby="chartViewLabel">
+                        <button type="button" class="chart-control__btn" data-view="trend" aria-pressed="true" aria-label="推移グラフ">推移</button>
+                        <button type="button" class="chart-control__btn" data-view="timeband" aria-pressed="false" aria-label="時間帯別">時間帯</button>
+                        <button type="button" class="chart-control__btn" data-view="weekday" aria-pressed="false" aria-label="曜日別">曜日</button>
+                    </div>
+                </div>
+                
+                <!-- グラフ種別（推移ビューのみ有効） -->
+                <div class="form-field chart-type-field" id="chartTypeField">
+                    <span class="form-field__label" id="chartTypeLabel">グラフ種別</span>
+                    <div class="chart-control__segments" role="group" aria-labelledby="chartTypeLabel">
+                        <button type="button" class="chart-control__btn" data-type="line" aria-pressed="true" aria-label="折れ線グラフ">折れ線</button>
+                        <button type="button" class="chart-control__btn" data-type="bar" aria-pressed="false" aria-label="棒グラフ">棒</button>
+                        <button type="button" class="chart-control__btn" data-type="scatter" aria-pressed="false" aria-label="散布図">散布</button>
+                    </div>
+                </div>
+                
+                <!-- 目標ライン設定 -->
+                <div class="form-field chart-target-field">
+                    <div class="chart-target__header">
+                        <label class="form-field__label">目標ライン</label>
+                        <label class="chart-target__toggle">
+                            <input type="checkbox" id="targetEnabled" aria-label="目標ラインを表示">
+                            <span class="chart-target__toggle-slider">表示</span>
+                        </label>
+                    </div>
+                    <div class="chart-target__inputs" id="chartTargetInputs">
+                        <input type="number" id="targetSys" class="form-field__input chart-target__input" min="50" max="250" placeholder="最高" aria-label="目標最高血圧 mmHg">
+                        <span class="chart-target__sep">/</span>
+                        <input type="number" id="targetDia" class="form-field__input chart-target__input" min="30" max="150" placeholder="最低" aria-label="目標最低血圧 mmHg">
+                        <span class="chart-target__unit">mmHg</span>
+                    </div>
+                    <span class="form-field__help">医師の指示がある場合に設定（例: 120/80）</span>
                 </div>
             </div>
             
@@ -284,8 +308,17 @@
             
             <!-- 空表示メッセージ -->
             <div id="emptyChartMessage" class="chart-empty" style="display: none;">
-                <p>過去7日分の記録がありません</p>
+                <p>選択された期間の記録がありません</p>
                 <p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>
+            </div>
+            
+            <!-- 統計情報カード -->
+            <div id="statsCardsContainer" class="stats-cards" style="display: none;">
+                <p class="stats-cards__count" id="statsRecordCount" aria-live="polite">測定回数: n=0</p>
+                <div class="stats-cards__grid" id="statsCardsGrid"></div>
+            </div>
+            <div id="statsEmptyMessage" class="chart-empty" style="display: none;">
+                <p>統計を表示するには記録が必要です</p>
             </div>
         </section>
 

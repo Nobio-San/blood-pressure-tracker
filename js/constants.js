@@ -249,3 +249,23 @@ const OCR_CONSTANTS = {
 };
 
 window.OCR_CONSTANTS = OCR_CONSTANTS;
+
+/**
+ * グラフ機能強化 定数（Phase 4 Step 4-2）
+ */
+const GRAPH_CONSTANTS = {
+    RANGE_KEYS: ['7d', '30d', '90d', 'all'],
+    RANGE_DAYS: { '7d': 7, '30d': 30, '90d': 90 },
+    CHART_TYPES: ['line', 'bar', 'scatter'],
+    VIEW_MODES: ['trend', 'timeband', 'weekday'],
+    TIMEBAND: {
+        morning: { start: 4, end: 10, label: '朝' },
+        noon: { start: 11, end: 16, label: '昼' },
+        night: { start: 17, end: 3, label: '夜' }
+    },
+    WEEKDAY_LABELS: ['月', '火', '水', '木', '金', '土', '日'],
+    SCATTER_MAX_DAYS: 90,
+    ANIMATION_THRESHOLD: 200,
+    STORAGE_KEY: 'bp_graph_state_v1'
+};
+window.GRAPH_CONSTANTS = GRAPH_CONSTANTS;

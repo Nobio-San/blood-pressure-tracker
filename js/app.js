@@ -108,22 +108,8 @@ function init() {
         btnResync.addEventListener('click', handleResync);
     }
     
-    // グラフフィルターのイベント
-    const chartMemberFilter = document.getElementById('chartMemberFilter');
-    if (chartMemberFilter) {
-        chartMemberFilter.addEventListener('change', refreshChart);
-    }
-    
-    // グラフ期間選択のイベント
-    const chartStartDate = document.getElementById('chartStartDate');
-    const chartEndDate = document.getElementById('chartEndDate');
-    if (chartStartDate && chartEndDate) {
-        chartStartDate.addEventListener('change', refreshChart);
-        chartEndDate.addEventListener('change', refreshChart);
-    }
-    
-    // グラフ期間の初期化（過去7日分をデフォルトとして設定）
-    initChartDateRange();
+    // グラフ機能強化 初期化（Phase 4 Step 4-2）
+    initGraphControls();
     
     // オフライン検知の初期化
     initOfflineDetection();
@@ -1029,372 +1015,380 @@ function handleDelete(event) {
    Chart.js グラフ表示（期間選択可能な血圧推移）
    ========================================= */
 
-/**
- * グラフ期間の初期化（過去7日分をデフォルトとして設定）
- */
-function initChartDateRange() {
-    const chartStartDate = document.getElementById('chartStartDate');
-    const chartEndDate = document.getElementById('chartEndDate');
-    
-    if (!chartStartDate || !chartEndDate) return;
-    
-    // 今日の日付
-    const today = new Date();
-    const todayStr = formatToDateOnly(today);
-    
-    // 7日前の日付
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - (CHART_DAYS - 1));
-    const startDateStr = formatToDateOnly(startDate);
-    
-    // 初期値を設定（空の場合のみ）
-    if (!chartStartDate.value) {
-        chartStartDate.value = startDateStr;
-    }
-    if (!chartEndDate.value) {
-        chartEndDate.value = todayStr;
-    }
+/* ===== graph: 状態・フィルタ・変換（Phase 4 Step 4-2） ===== */
+const GRAPH_STORAGE_KEY = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.STORAGE_KEY) ? GRAPH_CONSTANTS.STORAGE_KEY : 'bp_graph_state_v1';
+
+function getGraphState() {
+    const chartMemberFilter = document.getElementById('chartMemberFilter');
+    const memberId = chartMemberFilter ? chartMemberFilter.value : 'all';
+    let rangeKey = '30d', chartType = 'line', viewMode = 'trend';
+    document.querySelectorAll('.chart-control__btn[data-range]').forEach(btn => { if (btn.getAttribute('aria-pressed') === 'true') rangeKey = btn.dataset.range || '30d'; });
+    document.querySelectorAll('.chart-control__btn[data-type]').forEach(btn => { if (btn.getAttribute('aria-pressed') === 'true') chartType = btn.dataset.type || 'line'; });
+    document.querySelectorAll('.chart-control__btn[data-view]').forEach(btn => { if (btn.getAttribute('aria-pressed') === 'true') viewMode = btn.dataset.view || 'trend'; });
+    const targetEnabledEl = document.getElementById('targetEnabled');
+    const targetSysEl = document.getElementById('targetSys');
+    const targetDiaEl = document.getElementById('targetDia');
+    return {
+        memberId,
+        rangeKey,
+        chartType,
+        viewMode,
+        targetEnabled: targetEnabledEl ? targetEnabledEl.checked : false,
+        targetSys: targetSysEl && targetSysEl.value ? parseInt(targetSysEl.value, 10) : null,
+        targetDia: targetDiaEl && targetDiaEl.value ? parseInt(targetDiaEl.value, 10) : null
+    };
 }
 
-/**
- * Date オブジェクトを YYYY-MM-DD 形式に整形
- * @param {Date} date - 変換する日付
- * @returns {string} YYYY-MM-DD形式の文字列
- */
-function formatToDateOnly(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function setGraphStateFromDOM() {
+    const state = getGraphState();
+    if (isStorageAvailable()) { try { localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify(state)); } catch (e) { console.warn('グラフ状態の保存に失敗:', e); } }
+    return state;
 }
 
-/**
- * 指定期間のレコードを抽出
- * @param {Array} records - 全レコード配列
- * @param {string} startDateStr - 開始日（YYYY-MM-DD）
- * @param {string} endDateStr - 終了日（YYYY-MM-DD）
- * @returns {Array} 期間内のレコード
- */
-function extractRecordsByDateRange(records, startDateStr, endDateStr) {
-    // 日付文字列をDateオブジェクトに変換（開始日は0:00、終了日は23:59:59）
-    const startDate = new Date(startDateStr);
-    startDate.setHours(0, 0, 0, 0);
-    
-    const endDate = new Date(endDateStr);
-    endDate.setHours(23, 59, 59, 999);
-    
-    return records.filter(record => {
-        if (!record.datetimeIso) return false;
-        const recordDate = new Date(record.datetimeIso);
-        return recordDate >= startDate && recordDate <= endDate;
+function loadGraphStateFromStorage() {
+    if (!isStorageAvailable()) return null;
+    try { const json = localStorage.getItem(GRAPH_STORAGE_KEY); return json ? JSON.parse(json) : null; } catch (e) { return null; }
+}
+
+function getFilteredRecords(opts) {
+    const { records, memberId, rangeKey, now } = opts;
+    let filtered = records;
+    if (memberId && memberId !== 'all') filtered = records.filter(r => r.member === memberId);
+    if (rangeKey === 'all') return filtered;
+    const days = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.RANGE_DAYS) ? GRAPH_CONSTANTS.RANGE_DAYS[rangeKey] : (rangeKey === '7d' ? 7 : rangeKey === '30d' ? 30 : 90);
+    if (!days) return filtered;
+    const baseDate = now || new Date();
+    const startOfRange = new Date(baseDate); startOfRange.setDate(startOfRange.getDate() - days + 1); startOfRange.setHours(0, 0, 0, 0);
+    const endOfRange = new Date(baseDate); endOfRange.setHours(23, 59, 59, 999);
+    return filtered.filter(record => {
+        const t = record.measuredAt != null ? record.measuredAt : (record.datetimeIso ? new Date(record.datetimeIso).getTime() : 0);
+        return t >= startOfRange.getTime() && t <= endOfRange.getTime();
     });
 }
 
-/**
- * 日付キー（YYYY-MM-DD）を生成（ローカルタイム）
- * @param {Date} date - 日付オブジェクト
- * @returns {string} 日付キー
- */
 function getDateKey(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const d = date instanceof Date ? date : new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/**
- * 日付キーを表示用ラベル（MM/DD）に変換
- * @param {string} dateKey - YYYY-MM-DD形式の日付キー
- * @returns {string} MM/DD形式のラベル
- */
 function formatDateLabel(dateKey) {
-    const [year, month, day] = dateKey.split('-');
-    return `${month}/${day}`;
+    const parts = dateKey.split('-');
+    return parts.length >= 3 ? `${parts[1]}/${parts[2]}` : dateKey;
 }
 
-/**
- * レコードを日付ごとにグループ化し、平均値を計算
- * @param {Array} records - レコード配列
- * @returns {Object} { dateKey: { systolic, diastolic, pulse, count, timestamp } }
- */
-function groupAndAverageByDate(records) {
+function transformTrendLineBar(records) {
     const grouped = {};
-    
     records.forEach(record => {
-        const date = new Date(record.datetimeIso);
-        const dateKey = getDateKey(date);
-        
-        if (!grouped[dateKey]) {
-            grouped[dateKey] = {
-                systolic: 0,
-                diastolic: 0,
-                pulse: 0,
-                count: 0,
-                timestamp: date.getTime()
-            };
-        }
-        
+        const dt = record.datetimeIso ? new Date(record.datetimeIso) : new Date(record.measuredAt);
+        const dateKey = getDateKey(dt);
+        if (!grouped[dateKey]) grouped[dateKey] = { systolic: 0, diastolic: 0, pulse: 0, count: 0, timestamp: dt.getTime() };
         grouped[dateKey].systolic += record.systolic;
         grouped[dateKey].diastolic += record.diastolic;
         grouped[dateKey].pulse += record.pulse;
         grouped[dateKey].count += 1;
     });
-    
-    // 平均値を計算（四捨五入）
-    Object.keys(grouped).forEach(dateKey => {
-        const group = grouped[dateKey];
-        group.systolic = Math.round(group.systolic / group.count);
-        group.diastolic = Math.round(group.diastolic / group.count);
-        group.pulse = Math.round(group.pulse / group.count);
+    Object.keys(grouped).forEach(k => {
+        const g = grouped[k];
+        g.systolic = Math.round(g.systolic / g.count);
+        g.diastolic = Math.round(g.diastolic / g.count);
+        g.pulse = Math.round(g.pulse / g.count);
     });
-    
-    return grouped;
+    const sorted = Object.entries(grouped).sort((a, b) => a[1].timestamp - b[1].timestamp);
+    return { labels: sorted.map(([k]) => formatDateLabel(k)), systolic: sorted.map(([, v]) => v.systolic), diastolic: sorted.map(([, v]) => v.diastolic), pulse: sorted.map(([, v]) => v.pulse) };
 }
 
-/**
- * Chart.js用のデータ構造に変換（昇順ソート）
- * @param {Object} groupedData - 日付グループ化データ
- * @returns {Object} { labels: [], systolic: [], diastolic: [], pulse: [] }
- */
-function buildChartData(groupedData) {
-    // 日付の昇順にソート（古い→新しい）
-    const sortedEntries = Object.entries(groupedData).sort((a, b) => {
-        return a[1].timestamp - b[1].timestamp;
+function transformTrendScatter(records) {
+    const maxDays = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.SCATTER_MAX_DAYS) ? GRAPH_CONSTANTS.SCATTER_MAX_DAYS : 90;
+    const sorted = [...records].sort((a, b) => {
+        const ta = a.measuredAt != null ? a.measuredAt : new Date(a.datetimeIso).getTime();
+        const tb = b.measuredAt != null ? b.measuredAt : new Date(b.datetimeIso).getTime();
+        return ta - tb;
     });
-    
-    const labels = [];
-    const systolic = [];
-    const diastolic = [];
-    const pulse = [];
-    
-    sortedEntries.forEach(([dateKey, data]) => {
-        labels.push(formatDateLabel(dateKey));
-        systolic.push(data.systolic);
-        diastolic.push(data.diastolic);
-        pulse.push(data.pulse);
+    let useRecords = sorted.length > maxDays * 5 ? sorted.filter((_, i) => i % Math.max(1, Math.ceil(sorted.length / (maxDays * 3))) === 0) : sorted;
+    const sysPoints = [], diaPoints = [], pulsePoints = [];
+    useRecords.forEach(r => {
+        const dt = r.datetimeIso ? new Date(r.datetimeIso) : new Date(r.measuredAt);
+        const lbl = dt.toLocaleString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        sysPoints.push({ x: dt.getTime(), y: r.systolic, label: lbl, member: r.member });
+        diaPoints.push({ x: dt.getTime(), y: r.diastolic, label: lbl, member: r.member });
+        pulsePoints.push({ x: dt.getTime(), y: r.pulse, label: lbl, member: r.member });
     });
-    
-    return { labels, systolic, diastolic, pulse };
+    return { labels: useRecords.map(() => ''), sysPoints, diaPoints, pulsePoints, type: 'scatter' };
 }
 
-/**
- * Chart.jsでグラフを描画または更新
- * @param {Object} chartData - { labels, systolic, diastolic, pulse }
- */
-function renderOrUpdateChart(chartData) {
+function getTimebandKey(hour) {
+    if (hour >= 4 && hour <= 10) return 'morning';
+    if (hour >= 11 && hour <= 16) return 'noon';
+    return 'night';
+}
+
+function transformTimeband(records) {
+    const order = ['morning', 'noon', 'night'];
+    const labels = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.TIMEBAND) ? [GRAPH_CONSTANTS.TIMEBAND.morning.label, GRAPH_CONSTANTS.TIMEBAND.noon.label, GRAPH_CONSTANTS.TIMEBAND.night.label] : ['朝', '昼', '夜'];
+    const agg = { morning: { s: 0, d: 0, p: 0, n: 0 }, noon: { s: 0, d: 0, p: 0, n: 0 }, night: { s: 0, d: 0, p: 0, n: 0 } };
+    records.forEach(r => {
+        const dt = r.datetimeIso ? new Date(r.datetimeIso) : new Date(r.measuredAt);
+        const key = getTimebandKey(dt.getHours());
+        agg[key].s += r.systolic; agg[key].d += r.diastolic; agg[key].p += r.pulse; agg[key].n += 1;
+    });
+    const systolic = [], diastolic = [], pulse = [];
+    order.forEach(k => {
+        const a = agg[k];
+        systolic.push(a.n > 0 ? Math.round(a.s / a.n) : null);
+        diastolic.push(a.n > 0 ? Math.round(a.d / a.n) : null);
+        pulse.push(a.n > 0 ? Math.round(a.p / a.n) : null);
+    });
+    return { labels, systolic, diastolic, pulse, type: 'bar' };
+}
+
+function transformWeekday(records) {
+    const labels = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.WEEKDAY_LABELS) ? [...GRAPH_CONSTANTS.WEEKDAY_LABELS] : ['月', '火', '水', '木', '金', '土', '日'];
+    const agg = Array(7).fill(0).map(() => ({ s: 0, d: 0, p: 0, n: 0 }));
+    records.forEach(r => {
+        const dt = r.datetimeIso ? new Date(r.datetimeIso) : new Date(r.measuredAt);
+        const idx = dt.getDay() === 0 ? 6 : dt.getDay() - 1;
+        agg[idx].s += r.systolic; agg[idx].d += r.diastolic; agg[idx].p += r.pulse; agg[idx].n += 1;
+    });
+    return { labels, systolic: agg.map(a => a.n > 0 ? Math.round(a.s / a.n) : null), diastolic: agg.map(a => a.n > 0 ? Math.round(a.d / a.n) : null), pulse: agg.map(a => a.n > 0 ? Math.round(a.p / a.n) : null), type: 'bar' };
+}
+
+function calcStats(records) {
+    const sysArr = records.map(r => r.systolic).filter(v => v != null && !isNaN(v));
+    const diaArr = records.map(r => r.diastolic).filter(v => v != null && !isNaN(v));
+    const pulseArr = records.map(r => r.pulse).filter(v => v != null && !isNaN(v));
+    const avg = (arr) => arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length;
+    const std = (arr) => { if (arr.length < 2) return null; const m = avg(arr); return Math.sqrt(arr.reduce((s, x) => s + (x - m) * (x - m), 0) / arr.length); };
+    return { count: records.length, systolic: { avg: avg(sysArr), min: sysArr.length ? Math.min(...sysArr) : null, max: sysArr.length ? Math.max(...sysArr) : null, std: std(sysArr) }, diastolic: { avg: avg(diaArr), min: diaArr.length ? Math.min(...diaArr) : null, max: diaArr.length ? Math.max(...diaArr) : null, std: std(diaArr) }, pulse: { avg: avg(pulseArr), min: pulseArr.length ? Math.min(...pulseArr) : null, max: pulseArr.length ? Math.max(...pulseArr) : null, std: std(pulseArr) } };
+}
+
+function buildChartDatasets(chartData, state) {
+    const { targetEnabled, targetSys, targetDia, chartType, viewMode } = state;
+    const datasets = [];
+    const isScatter = chartType === 'scatter' && chartData.type === 'scatter';
+    if (isScatter) {
+        datasets.push({ label: '最高血圧 (mmHg)', data: chartData.sysPoints, borderColor: 'rgb(220, 53, 69)', backgroundColor: 'rgba(220, 53, 69, 0.4)', pointRadius: 5, pointHoverRadius: 8, yAxisID: 'y' });
+        datasets.push({ label: '最低血圧 (mmHg)', data: chartData.diaPoints, borderColor: 'rgb(13, 110, 253)', backgroundColor: 'rgba(13, 110, 253, 0.4)', pointRadius: 5, pointHoverRadius: 8, yAxisID: 'y' });
+        datasets.push({ label: '脈拍 (bpm)', data: chartData.pulsePoints, borderColor: 'rgb(25, 135, 84)', backgroundColor: 'rgba(25, 135, 84, 0.4)', pointRadius: 5, pointHoverRadius: 8, yAxisID: 'y1' });
+    } else {
+        datasets.push({ label: '最高血圧 (mmHg)', data: chartData.systolic, borderColor: 'rgb(220, 53, 69)', backgroundColor: 'rgba(220, 53, 69, 0.1)', tension: 0.1, yAxisID: 'y' });
+        datasets.push({ label: '最低血圧 (mmHg)', data: chartData.diastolic, borderColor: 'rgb(13, 110, 253)', backgroundColor: 'rgba(13, 110, 253, 0.1)', tension: 0.1, yAxisID: 'y' });
+        datasets.push({ label: '脈拍 (bpm)', data: chartData.pulse, borderColor: 'rgb(25, 135, 84)', backgroundColor: 'rgba(25, 135, 84, 0.1)', tension: 0.1, yAxisID: 'y1' });
+    }
+    const showTarget = targetEnabled && (targetSys != null || targetDia != null) && viewMode === 'trend' && !isScatter;
+    const labels = chartData.labels || [];
+    if (showTarget && targetSys != null) datasets.push({ label: '目標(最高)', data: labels.map(() => targetSys), borderColor: 'rgba(220, 53, 69, 0.6)', borderDash: [5, 5], borderWidth: 1, pointRadius: 0, fill: false, yAxisID: 'y' });
+    if (showTarget && targetDia != null) datasets.push({ label: '目標(最低)', data: labels.map(() => targetDia), borderColor: 'rgba(13, 110, 253, 0.6)', borderDash: [5, 5], borderWidth: 1, pointRadius: 0, fill: false, yAxisID: 'y' });
+    return datasets;
+}
+
+function renderOrUpdateChart(chartData, state) {
     const canvas = document.getElementById('bpChart');
-    if (!canvas) {
-        console.error('Canvas要素が見つかりません');
-        return;
-    }
-    
-    // 既存のチャートを破棄
-    if (bpChartInstance) {
-        bpChartInstance.destroy();
-        bpChartInstance = null;
-    }
-    
+    if (!canvas) return;
+    if (bpChartInstance) { bpChartInstance.destroy(); bpChartInstance = null; }
+    const st = state || getGraphState();
+    const chartType = st.chartType || 'line';
+    const viewMode = st.viewMode || 'trend';
+    let type = 'line';
+    if (chartData.type === 'scatter') type = 'scatter';
+    else if (chartType === 'bar' || viewMode === 'timeband' || viewMode === 'weekday') type = 'bar';
+    const labels = chartData.labels || [];
+    const datasets = buildChartDatasets(chartData, st);
+    const pointCount = (chartData.systolic && chartData.systolic.length) || (chartData.sysPoints && chartData.sysPoints.length) || 0;
+    const animThreshold = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.ANIMATION_THRESHOLD) ? GRAPH_CONSTANTS.ANIMATION_THRESHOLD : 200;
+    const animDuration = pointCount > animThreshold ? 0 : 300;
+    const Y_MARGIN = 20;
+    let bpValues = chartData.type === 'scatter'
+        ? [...(chartData.sysPoints || []).map(p => p.y), ...(chartData.diaPoints || []).map(p => p.y)].filter(v => v != null && !isNaN(v))
+        : [...(chartData.systolic || []), ...(chartData.diastolic || [])].filter(v => v != null && !isNaN(v));
+    if (st.targetEnabled && st.targetSys != null) bpValues = [...bpValues, st.targetSys];
+    if (st.targetEnabled && st.targetDia != null) bpValues = [...bpValues, st.targetDia];
+    const pulseValues = chartData.type === 'scatter'
+        ? (chartData.pulsePoints || []).map(p => p.y).filter(v => v != null && !isNaN(v))
+        : (chartData.pulse || []).filter(v => v != null && !isNaN(v));
+    const bpMin = bpValues.length ? Math.min(...bpValues) - Y_MARGIN : undefined;
+    const bpMax = bpValues.length ? Math.max(...bpValues) + Y_MARGIN : undefined;
+    const pulseMin = pulseValues.length ? Math.min(...pulseValues) - Y_MARGIN : undefined;
+    const pulseMax = pulseValues.length ? Math.max(...pulseValues) + Y_MARGIN : undefined;
     const ctx = canvas.getContext('2d');
-    
     bpChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: chartData.labels,
-            datasets: [
-                {
-                    label: '最高血圧 (mmHg)',
-                    data: chartData.systolic,
-                    borderColor: 'rgb(220, 53, 69)',
-                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                    tension: 0.1,
-                    yAxisID: 'y'
-                },
-                {
-                    label: '最低血圧 (mmHg)',
-                    data: chartData.diastolic,
-                    borderColor: 'rgb(13, 110, 253)',
-                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                    tension: 0.1,
-                    yAxisID: 'y'
-                },
-                {
-                    label: '脈拍 (bpm)',
-                    data: chartData.pulse,
-                    borderColor: 'rgb(25, 135, 84)',
-                    backgroundColor: 'rgba(25, 135, 84, 0.1)',
-                    tension: 0.1,
-                    yAxisID: 'y1'
-                }
-            ]
-        },
+        type,
+        data: { labels, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
+            animation: { duration: animDuration },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: {
-                    display: true,
-                    position: 'top',
-                    labels: {
-                        usePointStyle: true,
-                        padding: 15,
-                        font: {
-                            size: 12
-                        }
-                    }
-                },
+                legend: { display: true, position: 'bottom', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
                 tooltip: {
                     enabled: true,
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    padding: 12,
-                    titleFont: {
-                        size: 13
-                    },
-                    bodyFont: {
-                        size: 12
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                    padding: 10,
+                    titleFont: { size: 12 },
+                    bodyFont: { size: 11 },
+                    callbacks: {
+                        label: function(ctx) {
+                            const d = ctx.raw;
+                            if (d && typeof d === 'object' && d.label) return `${ctx.dataset.label}: ${ctx.parsed.y} (${d.label})`;
+                            return `${ctx.dataset.label}: ${ctx.parsed.y}`;
+                        }
                     }
                 }
             },
             scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '日付',
-                        font: {
-                            size: 12
-                        }
-                    },
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: {
-                        display: true,
-                        text: '血圧 (mmHg)',
-                        font: {
-                            size: 12
-                        }
-                    },
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.1)'
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    title: {
-                        display: true,
-                        text: '脈拍 (bpm)',
-                        font: {
-                            size: 12
-                        }
-                    },
-                    grid: {
-                        drawOnChartArea: false
-                    }
-                }
+                x: { display: true, title: { display: true, text: chartData.type === 'scatter' ? '日時' : (viewMode === 'timeband' ? '時間帯' : viewMode === 'weekday' ? '曜日' : '日付'), font: { size: 11 } }, grid: { display: false } },
+                y: { type: 'linear', display: true, position: 'left', min: bpMin, max: bpMax, title: { display: true, text: '血圧 (mmHg)', font: { size: 11 } }, grid: { color: 'rgba(0, 0, 0, 0.08)' } },
+                y1: { type: 'linear', display: true, position: 'right', min: pulseMin, max: pulseMax, title: { display: true, text: '脈拍 (bpm)', font: { size: 11 } }, grid: { drawOnChartArea: false } }
             }
         }
     });
 }
 
-/**
- * グラフUIの状態を更新（データあり/なし）
- * @param {boolean} hasData - データがあるかどうか
- */
-function updateChartUIState(hasData) {
+function updateChartUIState(hasData, emptyMessage) {
     const chartContainer = document.getElementById('chartContainer');
-    const emptyMessage = document.getElementById('emptyChartMessage');
-    
-    if (!chartContainer || !emptyMessage) {
-        console.error('グラフUI要素が見つかりません');
-        return;
-    }
-    
+    const emptyEl = document.getElementById('emptyChartMessage');
+    if (!chartContainer || !emptyEl) return;
     if (hasData) {
         chartContainer.style.display = 'block';
-        emptyMessage.style.display = 'none';
+        emptyEl.style.display = 'none';
     } else {
         chartContainer.style.display = 'none';
-        emptyMessage.style.display = 'block';
-        
-        // データがない場合は既存チャートを破棄
-        if (bpChartInstance) {
-            bpChartInstance.destroy();
-            bpChartInstance = null;
-        }
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = emptyMessage || '<p>選択された期間の記録がありません</p><p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>';
+        if (bpChartInstance) { bpChartInstance.destroy(); bpChartInstance = null; }
     }
 }
 
-/**
- * グラフを再描画（データ取得→加工→描画の一連の流れ）
- */
-function refreshChart() {
-    // localStorage から記録を読み込み
-    let allRecords = loadRecords();
-    
-    // グラフ用フィルター（全員/個別）
-    const chartMemberFilter = document.getElementById('chartMemberFilter');
-    const memberFilter = chartMemberFilter ? chartMemberFilter.value : 'all';
-    
-    // メンバーでフィルター
-    let filtered = allRecords;
-    if (memberFilter && memberFilter !== 'all') {
-        filtered = allRecords.filter(r => r.member === memberFilter);
-    }
-    
-    // 期間選択の値を取得
-    const chartStartDate = document.getElementById('chartStartDate');
-    const chartEndDate = document.getElementById('chartEndDate');
-    
-    let dateRangeRecords = filtered;
-    
-    // 開始日と終了日が両方とも入力されている場合のみ期間フィルターを適用
-    if (chartStartDate && chartEndDate && chartStartDate.value && chartEndDate.value) {
-        const startDateStr = chartStartDate.value;
-        const endDateStr = chartEndDate.value;
-        
-        // 開始日が終了日より後の場合はエラーメッセージを表示
-        if (startDateStr > endDateStr) {
-            updateChartUIState(false);
-            const emptyMessage = document.getElementById('emptyChartMessage');
-            if (emptyMessage) {
-                emptyMessage.innerHTML = '<p>開始日は終了日より前に設定してください</p>';
-            }
-            return;
-        }
-        
-        dateRangeRecords = extractRecordsByDateRange(filtered, startDateStr, endDateStr);
-    }
-    
-    // データがない場合は空表示
-    if (dateRangeRecords.length === 0) {
-        updateChartUIState(false);
-        const emptyMessage = document.getElementById('emptyChartMessage');
-        if (emptyMessage) {
-            emptyMessage.innerHTML = '<p>選択された期間の記録がありません</p><p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>';
-        }
+function renderStatsCards(stats, count) {
+    const container = document.getElementById('statsCardsContainer');
+    const grid = document.getElementById('statsCardsGrid');
+    const emptyMsg = document.getElementById('statsEmptyMessage');
+    const countEl = document.getElementById('statsRecordCount');
+    if (!container || !grid) return;
+    if (!stats || count === 0) {
+        container.style.display = 'none';
+        if (emptyMsg) emptyMsg.style.display = 'block';
         return;
     }
-    
-    // 日付ごとにグループ化して平均化
-    const grouped = groupAndAverageByDate(dateRangeRecords);
-    
-    // Chart.js用データに変換
-    const chartData = buildChartData(grouped);
-    
-    // グラフを描画
+    if (emptyMsg) emptyMsg.style.display = 'none';
+    container.style.display = 'block';
+    if (countEl) countEl.textContent = `測定回数: n=${count}`;
+    const round = (v) => (v != null && !isNaN(v)) ? Math.round(v) : '—';
+    const cards = [
+        { label: '最高血圧 平均', value: round(stats.systolic.avg), sub: stats.systolic.min != null ? `最小${stats.systolic.min} / 最大${stats.systolic.max}` : '' },
+        { label: '最低血圧 平均', value: round(stats.diastolic.avg), sub: stats.diastolic.min != null ? `最小${stats.diastolic.min} / 最大${stats.diastolic.max}` : '' },
+        { label: '脈拍 平均', value: round(stats.pulse.avg), sub: stats.pulse.min != null ? `最小${stats.pulse.min} / 最大${stats.pulse.max}` : '' },
+        { label: '標準偏差(最高)', value: round(stats.systolic.std), sub: '母標準偏差' },
+        { label: '標準偏差(最低)', value: round(stats.diastolic.std), sub: '母標準偏差' }
+    ];
+    grid.innerHTML = cards.map(c => `<div class="stats-card"><div class="stats-card__label">${c.label}</div><div class="stats-card__value">${c.value}</div>${c.sub ? `<div class="stats-card__sub">${c.sub}</div>` : ''}</div>`).join('');
+}
+
+function initGraphControls() {
+    const stored = loadGraphStateFromStorage();
+    const chartMemberFilter = document.getElementById('chartMemberFilter');
+    if (chartMemberFilter) chartMemberFilter.addEventListener('change', () => { setGraphStateFromDOM(); renderAll(); });
+    document.querySelectorAll('.chart-control__btn[data-range]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.chart-control__btn[data-range]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+            btn.setAttribute('aria-pressed', 'true');
+            setGraphStateFromDOM();
+            renderAll();
+        });
+    });
+    document.querySelectorAll('.chart-control__btn[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.chart-control__btn[data-view]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+            btn.setAttribute('aria-pressed', 'true');
+            updateChartTypeVisibility();
+            setGraphStateFromDOM();
+            renderAll();
+        });
+    });
+    document.querySelectorAll('.chart-control__btn[data-type]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.chart-control__btn[data-type]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+            btn.setAttribute('aria-pressed', 'true');
+            setGraphStateFromDOM();
+            renderAll();
+        });
+    });
+    const targetEnabled = document.getElementById('targetEnabled');
+    const targetSys = document.getElementById('targetSys');
+    const targetDia = document.getElementById('targetDia');
+    if (stored) {
+        if (stored.rangeKey) {
+            const rBtn = document.querySelector(`.chart-control__btn[data-range="${stored.rangeKey}"]`);
+            if (rBtn) { document.querySelectorAll('.chart-control__btn[data-range]').forEach(b => b.setAttribute('aria-pressed', 'false')); rBtn.setAttribute('aria-pressed', 'true'); }
+        }
+        if (stored.viewMode) {
+            const vBtn = document.querySelector(`.chart-control__btn[data-view="${stored.viewMode}"]`);
+            if (vBtn) { document.querySelectorAll('.chart-control__btn[data-view]').forEach(b => b.setAttribute('aria-pressed', 'false')); vBtn.setAttribute('aria-pressed', 'true'); }
+        }
+        if (stored.chartType) {
+            const tBtn = document.querySelector(`.chart-control__btn[data-type="${stored.chartType}"]`);
+            if (tBtn) { document.querySelectorAll('.chart-control__btn[data-type]').forEach(b => b.setAttribute('aria-pressed', 'false')); tBtn.setAttribute('aria-pressed', 'true'); }
+        }
+        if (stored.targetEnabled && targetEnabled) targetEnabled.checked = true;
+        if (stored.targetSys != null && targetSys) targetSys.value = String(stored.targetSys);
+        if (stored.targetDia != null && targetDia) targetDia.value = String(stored.targetDia);
+    }
+    if (targetEnabled) targetEnabled.addEventListener('change', () => { setGraphStateFromDOM(); renderAll(); });
+    if (targetSys) targetSys.addEventListener('change', () => {
+        const sys = targetSys.value ? parseInt(targetSys.value, 10) : null;
+        const dia = targetDia && targetDia.value ? parseInt(targetDia.value, 10) : null;
+        if (sys != null && dia != null && sys <= dia) { showMessage('warn', '最高血圧は最低血圧より大きい値を入力してください'); return; }
+        setGraphStateFromDOM();
+        renderAll();
+    });
+    if (targetDia) targetDia.addEventListener('change', () => {
+        const sys = targetSys && targetSys.value ? parseInt(targetSys.value, 10) : null;
+        const dia = targetDia.value ? parseInt(targetDia.value, 10) : null;
+        if (sys != null && dia != null && sys <= dia) { showMessage('warn', '最高血圧は最低血圧より大きい値を入力してください'); return; }
+        setGraphStateFromDOM();
+        renderAll();
+    });
+    updateChartTypeVisibility();
+}
+
+function updateChartTypeVisibility() {
+    let isTrend = true;
+    document.querySelectorAll('.chart-control__btn[data-view]').forEach(b => { if (b.getAttribute('aria-pressed') === 'true') isTrend = b.dataset.view === 'trend'; });
+    const typeField = document.getElementById('chartTypeField');
+    if (typeField) typeField.classList.toggle('chart-type-field--disabled', !isTrend);
+}
+
+function renderAll() {
+    const allRecords = loadRecords();
+    const state = setGraphStateFromDOM();
+    const filtered = getFilteredRecords({ records: allRecords, memberId: state.memberId, rangeKey: state.rangeKey, now: new Date() });
+    if (filtered.length === 0) {
+        updateChartUIState(false, '<p>選択された期間の記録がありません</p><p class="chart-empty__hint">記録が追加されると、ここにグラフが表示されます</p>');
+        renderStatsCards(null, 0);
+        return;
+    }
+    let chartData;
+    if (state.viewMode === 'timeband') chartData = transformTimeband(filtered);
+    else if (state.viewMode === 'weekday') chartData = transformWeekday(filtered);
+    else {
+        if (state.chartType === 'scatter') {
+            const maxDays = (typeof GRAPH_CONSTANTS !== 'undefined' && GRAPH_CONSTANTS.SCATTER_MAX_DAYS) ? GRAPH_CONSTANTS.SCATTER_MAX_DAYS : 90;
+            const rangeDays = state.rangeKey === 'all' ? 365 : (GRAPH_CONSTANTS && GRAPH_CONSTANTS.RANGE_DAYS && GRAPH_CONSTANTS.RANGE_DAYS[state.rangeKey]) || 30;
+            if (rangeDays > maxDays) {
+                const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - maxDays);
+                const limited = filtered.filter(r => { const t = r.measuredAt != null ? r.measuredAt : new Date(r.datetimeIso).getTime(); return t >= cutoff.getTime(); });
+                chartData = transformTrendScatter(limited.length ? limited : filtered);
+            } else chartData = transformTrendScatter(filtered);
+        } else chartData = transformTrendLineBar(filtered);
+    }
     updateChartUIState(true);
-    renderOrUpdateChart(chartData);
+    renderOrUpdateChart(chartData, state);
+    const stats = calcStats(filtered);
+    renderStatsCards(stats, filtered.length);
+}
+
+function refreshChart() {
+    renderAll();
 }
 
 /* =========================================
