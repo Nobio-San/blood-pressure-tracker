@@ -739,6 +739,10 @@ select.form-field__input {
     line-height: 1.5;
 }
 
+.notification-help__btn {
+    margin-top: var(--space-4);
+}
+
 .export-message--success {
     color: var(--color-success);
 }

@@ -73,37 +73,74 @@ function saveNotificationSettings(settings) {
 /**
  * 設定UIを初期化し、イベントを紐付ける
  * @param {Function} onSettingsChange - 設定変更時のコールバック（reschedule用）
- * @param {Function} onPermissionRequest - 通知ON時に許可要求するコールバック
  */
-function initNotificationSettingsUI(onSettingsChange, onPermissionRequest) {
+function initNotificationSettingsUI(onSettingsChange) {
     const toggleEl = document.getElementById('notificationToggle');
     const morningInput = document.getElementById('notificationMorningTime');
     const eveningInput = document.getElementById('notificationEveningTime');
     const frequencySelect = document.getElementById('notificationFrequency');
     const helpBlock = document.getElementById('notificationHelp');
+    const btnRequestPermission = document.getElementById('btnRequestNotificationPermission');
 
     if (!toggleEl) return;
 
     const settings = loadNotificationSettings();
     applySettingsToUI(settings);
 
-    toggleEl.addEventListener('change', async (e) => {
-        const checked = e.target.checked;
-        if (checked) {
-            const granted = await onPermissionRequest();
-            if (!granted) {
-                toggleEl.checked = false;
-                if (helpBlock) helpBlock.classList.add('notification-help--visible');
-                return;
-            }
-            if (helpBlock) helpBlock.classList.remove('notification-help--visible');
-        }
-
+    function applyPermissionGranted() {
         const next = loadNotificationSettings();
-        next.notificationEnabled = checked;
+        next.notificationEnabled = true;
         saveNotificationSettings(next);
         onSettingsChange();
+        if (helpBlock) helpBlock.classList.remove('notification-help--visible');
+    }
+
+    function applyPermissionDenied() {
+        toggleEl.checked = false;
+        toggleEl.setAttribute('aria-checked', 'false');
+        if (helpBlock) helpBlock.classList.add('notification-help--visible');
+    }
+
+    function doRequestPermission() {
+        if (!('Notification' in window)) {
+            applyPermissionDenied();
+            return;
+        }
+        if (Notification.permission === 'granted') {
+            applyPermissionGranted();
+            return;
+        }
+        if (Notification.permission === 'denied') {
+            applyPermissionDenied();
+            return;
+        }
+        Notification.requestPermission().then((result) => {
+            if (result === 'granted') {
+                applyPermissionGranted();
+            } else {
+                applyPermissionDenied();
+            }
+        });
+    }
+
+    toggleEl.addEventListener('change', (e) => {
+        const checked = e.target.checked;
+        if (checked) {
+            doRequestPermission();
+        } else {
+            const next = loadNotificationSettings();
+            next.notificationEnabled = false;
+            saveNotificationSettings(next);
+            onSettingsChange();
+            if (helpBlock) helpBlock.classList.remove('notification-help--visible');
+        }
     });
+
+    if (btnRequestPermission) {
+        btnRequestPermission.addEventListener('click', () => {
+            doRequestPermission();
+        });
+    }
 
     if (morningInput) {
         morningInput.addEventListener('change', () => {

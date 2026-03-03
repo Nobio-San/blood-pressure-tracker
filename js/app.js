@@ -153,8 +153,7 @@ function init() {
     // Phase 4 Step 4-4: 通知・リマインダー機能の初期化
     if (typeof window.initNotificationSettingsUI === 'function') {
         window.initNotificationSettingsUI(
-            () => { if (typeof window.rescheduleReminder === 'function') window.rescheduleReminder(); },
-            () => typeof window.requestNotificationPermission === 'function' ? window.requestNotificationPermission() : Promise.resolve(false)
+            () => { if (typeof window.rescheduleReminder === 'function') window.rescheduleReminder(); }
         );
     }
     if (typeof window.checkReminderFallbackOnStartup === 'function') {
