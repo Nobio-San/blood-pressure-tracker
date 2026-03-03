@@ -3,7 +3,7 @@
  * 目的: 通知表示（SW経由）、許可状態判定、フォールバック
  */
 
-const NC = window.NOTIFICATION_CONSTANTS || {};
+const NOTIF_NC = window.NOTIFICATION_CONSTANTS || {};
 
 /**
  * 通知が利用可能かどうかを判定
@@ -49,7 +49,7 @@ async function showRecordCompleteNotification(settings) {
     if (!settings.notificationEnabled || !settings.recordCompleteEnabled) return false;
     if (getNotificationPermission() !== 'granted') return false;
 
-    const suppressMs = NC.RECORD_COMPLETE_SUPPRESS_MS || 60000;
+    const suppressMs = NOTIF_NC.RECORD_COMPLETE_SUPPRESS_MS || 60000;
     const now = Date.now();
     if (settings.lastRecordCompleteNotifiedAt && (now - settings.lastRecordCompleteNotifiedAt) < suppressMs) {
         return false;
@@ -59,8 +59,8 @@ async function showRecordCompleteNotification(settings) {
         const reg = await navigator.serviceWorker?.ready;
         if (!reg) return false;
 
-        await reg.showNotification(NC.TITLE_RECORD_COMPLETE || '記録が保存されました', {
-            body: NC.BODY_RECORD_COMPLETE || '血圧の記録を保存しました',
+        await reg.showNotification(NOTIF_NC.TITLE_RECORD_COMPLETE || '記録が保存されました', {
+            body: NOTIF_NC.BODY_RECORD_COMPLETE || '血圧の記録を保存しました',
             icon: './icons/icon-192.png',
             tag: 'record-complete',
             requireInteraction: false,
@@ -85,10 +85,10 @@ async function showRecordCompleteNotification(settings) {
 async function showReminderNotification(slot) {
     if (getNotificationPermission() !== 'granted') return false;
 
-    const title = NC.TITLE_REMINDER || '測定の時間です';
+    const title = NOTIF_NC.TITLE_REMINDER || '測定の時間です';
     const body = slot === 'morning'
-        ? (NC.BODY_REMINDER_MORNING || '朝の血圧測定をお忘れなく')
-        : (NC.BODY_REMINDER_EVENING || '夜の血圧測定をお忘れなく');
+        ? (NOTIF_NC.BODY_REMINDER_MORNING || '朝の血圧測定をお忘れなく')
+        : (NOTIF_NC.BODY_REMINDER_EVENING || '夜の血圧測定をお忘れなく');
 
     try {
         const reg = await navigator.serviceWorker?.ready;
@@ -115,8 +115,8 @@ async function showReminderNotification(slot) {
 async function showReminderFallbackNotification() {
     if (getNotificationPermission() !== 'granted') return false;
 
-    const title = NC.TITLE_REMINDER_FALLBACK || '血圧測定のリマインド';
-    const body = NC.BODY_REMINDER_FALLBACK || '測定時刻を過ぎています。血圧を記録しましょう';
+    const title = NOTIF_NC.TITLE_REMINDER_FALLBACK || '血圧測定のリマインド';
+    const body = NOTIF_NC.BODY_REMINDER_FALLBACK || '測定時刻を過ぎています。血圧を記録しましょう';
 
     try {
         const reg = await navigator.serviceWorker?.ready;

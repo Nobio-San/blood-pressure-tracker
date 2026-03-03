@@ -3,8 +3,6 @@
  * 目的: 次回時刻計算、setTimeout予約、二重通知防止
  */
 
-const NC = window.NOTIFICATION_CONSTANTS || {};
-
 let reminderTimeoutId = null;
 
 /**
