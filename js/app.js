@@ -7,6 +7,7 @@
    定数・設定
    ========================================= */
 const STORAGE_KEY = 'bp_records_v1';
+const MEMBER_NAMES_STORAGE_KEY = 'bp_member_names_v1';
 const SCHEMA_VERSION = 1;
 const MAX_LIST_COUNT = 10; // 一覧の最大表示件数
 const SYNC_RETRY_INTERVAL_MS = 300; // 再同期時の送信間隔（ミリ秒）
@@ -87,6 +88,26 @@ function init() {
     
     // 測定日時の初期化（空の場合のみ）
     setDatetimeNow(measuredAtInput);
+    
+    // 記録者プルダウンを初期化
+    refreshAllMemberSelects();
+    
+    // 記録者名追加ボタン
+    const memberNameInput = document.getElementById('memberNameInput');
+    const btnAddMember = document.getElementById('btnAddMember');
+    if (memberNameInput && btnAddMember) {
+        btnAddMember.addEventListener('click', () => handleAddMember(memberNameInput));
+        memberNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddMember(memberNameInput);
+            }
+        });
+    }
+    const btnDeleteMember = document.getElementById('btnDeleteMember');
+    if (btnDeleteMember) {
+        btnDeleteMember.addEventListener('click', handleDeleteMember);
+    }
     
     // イベントリスナーの設定
     form.addEventListener('submit', handleSubmit);
@@ -219,6 +240,96 @@ function saveRecords(records) {
         }
         
         return false;
+    }
+}
+
+/**
+ * 記録者名リストを localStorage から取得
+ * @returns {string[]} 記録者名の配列
+ */
+function getMemberNamesList() {
+    if (!isStorageAvailable()) return [];
+    try {
+        const json = localStorage.getItem(MEMBER_NAMES_STORAGE_KEY);
+        if (!json) return [];
+        const data = JSON.parse(json);
+        return Array.isArray(data) ? data : [];
+    } catch (e) {
+        console.warn('記録者名リストの読み込みに失敗:', e);
+        return [];
+    }
+}
+
+/**
+ * 記録者名リストを localStorage に保存
+ * @param {string[]} names - 記録者名の配列
+ * @returns {boolean} 保存成功ならtrue
+ */
+function saveMemberNamesList(names) {
+    if (!isStorageAvailable()) return false;
+    try {
+        localStorage.setItem(MEMBER_NAMES_STORAGE_KEY, JSON.stringify(names));
+        return true;
+    } catch (e) {
+        console.warn('記録者名リストの保存に失敗:', e);
+        return false;
+    }
+}
+
+/**
+ * プルダウン用の記録者名リストを取得（保存済み＋既存レコードから重複排除・ソート）
+ * @param {Array} records - BpRecord[]（省略時は loadRecords を使用）
+ * @returns {string[]} 記録者名の配列
+ */
+function getMemberNamesForSelect(records) {
+    const stored = getMemberNamesList();
+    const recs = records || loadRecords();
+    const fromRecords = [...new Set(recs.map(r => r.member).filter(Boolean))];
+    const merged = [...new Set([...stored, ...fromRecords])];
+    const filtered = merged.filter(n => n !== '自分');
+    return filtered.sort((a, b) => a.localeCompare(b, 'ja'));
+}
+
+/**
+ * 記録者関連のプルダウン（member / filterMember / chartMemberFilter）を一括更新
+ */
+function refreshAllMemberSelects() {
+    const names = getMemberNamesForSelect(records || loadRecords());
+    const memberSelect = document.getElementById('member');
+    const filterSelect = document.getElementById('filterMember');
+    const chartFilter = document.getElementById('chartMemberFilter');
+    if (memberSelect) {
+        const current = memberSelect.value;
+        memberSelect.innerHTML = '<option value="">選択してください</option>';
+        names.forEach(n => {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.textContent = n;
+            memberSelect.appendChild(opt);
+        });
+        if (names.includes(current)) memberSelect.value = current;
+    }
+    if (filterSelect) {
+        const current = filterSelect.value;
+        filterSelect.innerHTML = '<option value="">全員</option>';
+        names.forEach(n => {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.textContent = n;
+            filterSelect.appendChild(opt);
+        });
+        if (names.includes(current)) filterSelect.value = current;
+    }
+    if (chartFilter) {
+        const current = chartFilter.value;
+        chartFilter.innerHTML = '<option value="all">全メンバー</option>';
+        names.forEach(n => {
+            const opt = document.createElement('option');
+            opt.value = n;
+            opt.textContent = n;
+            chartFilter.appendChild(opt);
+        });
+        if (current === 'all' || names.includes(current)) chartFilter.value = current;
     }
 }
 
@@ -882,6 +993,18 @@ async function handleSubmit(event) {
         showMessage('success', 'ローカルに保存しました');
         console.log('ローカル保存成功:', record);
         
+        // 記録者名をリストに追加（未登録の場合）
+        const memberName = record.member;
+        if (memberName) {
+            const list = getMemberNamesList();
+            if (!list.includes(memberName)) {
+                list.push(memberName);
+                list.sort((a, b) => a.localeCompare(b, 'ja'));
+                saveMemberNamesList(list);
+                refreshAllMemberSelects();
+            }
+        }
+        
         // 一覧とグラフを更新
         refreshRecordList();
         refreshChart();
@@ -936,6 +1059,65 @@ function getFirstErrorField(form, errors) {
     }
     
     return null;
+}
+
+/**
+ * 記録者名を追加し、プルダウンを更新
+ * @param {HTMLInputElement} memberNameInput - 記録者名入力要素
+ */
+function handleAddMember(memberNameInput) {
+    const name = (memberNameInput.value || '').trim();
+    if (!name) {
+        showMessage('error', '名前を入力してください');
+        if (memberNameInput) memberNameInput.focus();
+        return;
+    }
+    const list = getMemberNamesList();
+    if (list.includes(name)) {
+        showMessage('info', `「${name}」は既に登録されています`);
+        const memberSelect = document.getElementById('member');
+        if (memberSelect) memberSelect.value = name;
+        memberNameInput.value = '';
+        return;
+    }
+    list.push(name);
+    list.sort((a, b) => a.localeCompare(b, 'ja'));
+    if (!saveMemberNamesList(list)) {
+        showMessage('error', '記録者名の保存に失敗しました');
+        return;
+    }
+    refreshAllMemberSelects();
+    const memberSelect = document.getElementById('member');
+    if (memberSelect) memberSelect.value = name;
+    memberNameInput.value = '';
+    clearMessage();
+}
+
+/**
+ * 選択中の記録者名をリストから削除
+ */
+function handleDeleteMember() {
+    const memberSelect = document.getElementById('member');
+    if (!memberSelect) return;
+    const name = (memberSelect.value || '').trim();
+    if (!name) {
+        showMessage('error', '削除する記録者を選択してください');
+        return;
+    }
+    const list = getMemberNamesList();
+    if (!list.includes(name)) {
+        showMessage('info', `「${name}」は登録リストに含まれていません（過去の記録にのみ存在します）`);
+        return;
+    }
+    const filtered = list.filter(n => n !== name);
+    if (!saveMemberNamesList(filtered)) {
+        showMessage('error', '記録者名の削除に失敗しました');
+        return;
+    }
+    refreshAllMemberSelects();
+    memberSelect.value = '';
+    clearMessage();
+    showMessage('success', `「${name}」を削除しました`);
 }
 
 /**

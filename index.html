@@ -139,16 +139,19 @@
             </div>
 
             <form id="recordForm" class="record-form" novalidate>
-                <!-- 家族メンバー選択 -->
+                <!-- 記録者（名前入力＋プルダウン選択） -->
                 <div class="form-field">
-                    <label for="member" class="form-field__label">記録者</label>
-                    <select id="member" name="member" class="form-field__input" required>
-                        <option value="">選択してください</option>
-                        <option value="自分">自分</option>
-                        <option value="配偶者">配偶者</option>
-                        <option value="父">父</option>
-                        <option value="母">母</option>
-                    </select>
+                    <label for="memberNameInput" class="form-field__label">記録者</label>
+                    <div class="member-input-row">
+                        <input type="text" id="memberNameInput" class="form-field__input" placeholder="名前を入力" maxlength="50" aria-label="記録者名を入力">
+                        <button type="button" id="btnAddMember" class="btn btn--secondary">追加</button>
+                    </div>
+                    <div class="member-select-row">
+                        <select id="member" name="member" class="form-field__input" required aria-label="記録者を選択">
+                            <option value="">選択してください</option>
+                        </select>
+                        <button type="button" id="btnDeleteMember" class="btn btn--danger btn--small" aria-label="選択中の記録者を削除">削除</button>
+                    </div>
                 </div>
 
                 <!-- 血圧入力（最高/最低） -->
@@ -244,10 +247,6 @@
                     <label for="chartMemberFilter" class="form-field__label">表示対象</label>
                     <select id="chartMemberFilter" name="chartMemberFilter" class="form-field__input" aria-label="グラフ表示対象のメンバーを選択">
                         <option value="all">全メンバー</option>
-                        <option value="自分">自分</option>
-                        <option value="配偶者">配偶者</option>
-                        <option value="父">父</option>
-                        <option value="母">母</option>
                     </select>
                 </div>
                 
@@ -337,10 +336,6 @@
                     <label for="filterMember" class="form-field__label">表示対象</label>
                     <select id="filterMember" name="filterMember" class="form-field__input">
                         <option value="">全員</option>
-                        <option value="自分">自分</option>
-                        <option value="配偶者">配偶者</option>
-                        <option value="父">父</option>
-                        <option value="母">母</option>
                     </select>
                 </div>
                 <div id="recordCount" class="records-count" aria-live="polite">

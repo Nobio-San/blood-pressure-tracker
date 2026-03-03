@@ -261,6 +261,30 @@ select.form-field__input {
     padding-right: 2.5rem;
 }
 
+/* 記録者入力行（名前入力＋追加ボタン） */
+.member-input-row {
+    display: flex;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+.member-input-row .form-field__input {
+    flex: 1;
+}
+.member-input-row .btn {
+    flex-shrink: 0;
+}
+
+.member-select-row {
+    display: flex;
+    gap: var(--space-3);
+}
+.member-select-row .form-field__input {
+    flex: 1;
+}
+.member-select-row .btn {
+    flex-shrink: 0;
+}
+
 /* 血圧フィールドグループ（最高/最低を横並び） */
 .form-field-group {
     display: flex;
