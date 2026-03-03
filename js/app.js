@@ -622,6 +622,7 @@ function renderRecords(records) {
 
 /**
  * 一覧を再描画（load→filter→sort→limit→render）
+ * 表示期間は血圧推移グラフの選択期間に連動する
  */
 function refreshRecordList() {
     // localStorage から読み込み
@@ -630,8 +631,12 @@ function refreshRecordList() {
     // フィルタ（メンバー選択）
     const filterSelect = document.getElementById('filterMember');
     const memberFilter = filterSelect ? filterSelect.value : '';
+    const memberId = memberFilter || 'all';
     
-    let filtered = filterRecordsByMember(allRecords, memberFilter);
+    // 期間フィルタ（グラフの選択期間に連動）
+    let rangeKey = '30d';
+    document.querySelectorAll('.chart-control__btn[data-range]').forEach(btn => { if (btn.getAttribute('aria-pressed') === 'true') rangeKey = btn.dataset.range || '30d'; });
+    let filtered = getFilteredRecords({ records: allRecords, memberId, rangeKey, now: new Date() });
     
     // ソート（日時降順）
     let sorted = sortRecordsDescByDatetime(filtered);
@@ -1294,6 +1299,7 @@ function initGraphControls() {
             btn.setAttribute('aria-pressed', 'true');
             setGraphStateFromDOM();
             renderAll();
+            refreshRecordList();
         });
     });
     document.querySelectorAll('.chart-control__btn[data-view]').forEach(btn => {
