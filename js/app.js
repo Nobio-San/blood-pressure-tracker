@@ -22,6 +22,12 @@ const OCR_CONFIDENCE_HIGH = 90; // 高信頼度しきい値（緑/✓）
 const OCR_CONFIDENCE_MID  = 70; // 中信頼度しきい値（黄/!）
 const OCR_RETRY_LIMIT = 3;      // 再試行の上限回数
 
+// Phase 4 Step 4-3: CSVエクスポート関連
+const EXPORT_CSV_HEADERS = '日時,メンバー,最高血圧,最低血圧,脈拍';
+const EXPORT_CSV_EOL = '\r\n';
+const EXPORT_CSV_BOM = '\uFEFF';
+const EXPORT_DATE_FORMAT = 'YYYY/MM/DD HH:mm';
+
 // バリデーション範囲
 const VALIDATION = {
     systolic: { min: 50, max: 250 },
@@ -140,6 +146,9 @@ function init() {
     
     // Phase 3 Step 3-4: OCR確認UIの初期化
     initOcrAutoRun();
+    
+    // Phase 4 Step 4-3: エクスポートUIの初期化
+    initExportUI();
     
     // 初期表示
     refreshRecordList();
@@ -1196,6 +1205,165 @@ function handleDelete(event) {
         console.error('削除処理エラー:', error);
         showMessage('error', '削除に失敗しました');
     }
+}
+
+/* =========================================
+   Phase 4 Step 4-3: CSVエクスポート
+   ========================================= */
+
+/**
+ * エクスポート対象レコードを取得（期間・メンバーでフィルタ、日時昇順）
+ * @param {Object} opts - { member, range, now }
+ * @returns {Array} フィルタ済み・ソート済みレコード配列
+ */
+function getExportRecords(opts) {
+    const allRecords = loadRecords();
+    const memberId = (opts && opts.member) ? opts.member : 'all';
+    const rangeKey = (opts && opts.range) ? opts.range : 'all';
+    const now = (opts && opts.now) ? opts.now : new Date();
+    const filtered = getFilteredRecords({ records: allRecords, memberId, rangeKey, now });
+    return [...filtered].sort((a, b) => {
+        const ta = a.measuredAt != null ? a.measuredAt : (a.datetimeIso ? new Date(a.datetimeIso).getTime() : 0);
+        const tb = b.measuredAt != null ? b.measuredAt : (b.datetimeIso ? new Date(b.datetimeIso).getTime() : 0);
+        return ta - tb;
+    });
+}
+
+/**
+ * CSVセル値をエスケープ（カンマ/改行/ダブルクォートを含む場合は"で囲み、内部"は""に）
+ * @param {*} value - セル値
+ * @returns {string} エスケープ済み文字列
+ */
+function escapeCsvCell(value) {
+    if (value == null || value === '') return '';
+    const str = String(value);
+    if (/[,\r\n"]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+/**
+ * レコード配列からCSV文字列を生成（UTF-8 BOM + CRLF + クォート済み）
+ * @param {Array} records - BpRecord[]
+ * @returns {string} CSV文字列
+ */
+function toCsv(records) {
+    const lines = [EXPORT_CSV_HEADERS];
+    records.forEach(r => {
+        const dtStr = formatDateTime(r.datetimeIso);
+        const row = [
+            escapeCsvCell(dtStr),
+            escapeCsvCell(r.member),
+            escapeCsvCell(r.systolic),
+            escapeCsvCell(r.diastolic),
+            escapeCsvCell(r.pulse)
+        ].join(',');
+        lines.push(row);
+    });
+    return EXPORT_CSV_BOM + lines.join(EXPORT_CSV_EOL);
+}
+
+/**
+ * テキストファイルをダウンロード（Blob + a[download]）
+ * @param {string} filename - ファイル名
+ * @param {string} content - ファイル内容
+ * @param {string} mime - MIMEタイプ（省略時は text/csv;charset=utf-8）
+ */
+function downloadTextFile(filename, content, mime) {
+    const type = mime || 'text/csv;charset=utf-8';
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * エクスポート用ファイル名を生成（blood_pressure_YYYYMMDD.csv）
+ * @param {Object} opts - { member, range }（任意、ファイル名に含めない場合は省略）
+ * @returns {string} ファイル名
+ */
+function generateExportFilename(opts) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `blood_pressure_${y}${m}${d}.csv`;
+}
+
+/**
+ * CSVエクスポート実行ハンドラ（UIから呼び出し）
+ */
+function handleExportCsv() {
+    const btn = document.getElementById('btnExportCsv');
+    const msgEl = document.getElementById('exportMessage');
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
+    if (msgEl) { msgEl.textContent = ''; msgEl.className = 'export-message'; }
+
+    const run = () => {
+        const originalText = btn ? btn.textContent : '';
+        if (btn) btn.textContent = '作成中…';
+        try {
+            const state = getGraphState();
+            const exportRecords = getExportRecords({
+                member: state.memberId,
+                range: state.rangeKey,
+                now: new Date()
+            });
+
+            if (exportRecords.length === 0) {
+                if (msgEl) { msgEl.textContent = 'エクスポート対象がありません'; msgEl.className = 'export-message export-message--warn'; }
+                return;
+            }
+
+            const csv = toCsv(exportRecords);
+            const filename = generateExportFilename();
+            downloadTextFile(filename, csv);
+            if (msgEl) { msgEl.textContent = `${exportRecords.length}件をダウンロードしました`; msgEl.className = 'export-message export-message--success'; }
+        } catch (e) {
+            console.error('[Export] エラー:', e);
+            if (msgEl) { msgEl.textContent = 'ダウンロードに失敗しました'; msgEl.className = 'export-message export-message--error'; }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = originalText; }
+        }
+    };
+
+    requestAnimationFrame(() => run());
+}
+
+/**
+ * エクスポートUIの初期化（ボタン・件数プレビュー・条件表示）
+ */
+function initExportUI() {
+    const btn = document.getElementById('btnExportCsv');
+    const previewEl = document.getElementById('exportPreview');
+    const conditionEl = document.getElementById('exportCondition');
+    if (!btn) return;
+
+    const updatePreview = () => {
+        const state = getGraphState();
+        const exportRecords = getExportRecords({ member: state.memberId, range: state.rangeKey, now: new Date() });
+        if (previewEl) previewEl.textContent = `対象: ${exportRecords.length}件`;
+        if (conditionEl) {
+            const rangeLabel = state.rangeKey === 'all' ? '全期間' : (state.rangeKey === '7d' ? '7日' : state.rangeKey === '30d' ? '30日' : state.rangeKey === '90d' ? '90日' : state.rangeKey);
+            const memberLabel = (state.memberId === 'all' || !state.memberId) ? '全員' : state.memberId;
+            conditionEl.textContent = `期間: ${rangeLabel} / メンバー: ${memberLabel}`;
+        }
+    };
+
+    btn.addEventListener('click', handleExportCsv);
+    updatePreview();
+    document.getElementById('chartMemberFilter')?.addEventListener('change', updatePreview);
+    document.querySelectorAll('.chart-control__btn[data-range]').forEach(b => {
+        b.addEventListener('click', updatePreview);
+    });
 }
 
 /* =========================================

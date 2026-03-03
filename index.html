@@ -354,6 +354,20 @@
                 <!-- 一覧描画先 -->
                 <div id="recordList" class="records-list" style="display: none;"></div>
             </div>
+
+            <!-- Phase 4 Step 4-3: データエクスポート -->
+            <div class="export-card">
+                <h3 class="export-card__title">データをダウンロード</h3>
+                <p class="export-card__desc">血圧推移グラフの期間・表示対象で絞り込んだデータをCSVでダウンロードできます</p>
+                <p id="exportCondition" class="export-card__condition" aria-live="polite">期間: 30日 / メンバー: 全員</p>
+                <p id="exportPreview" class="export-card__preview" aria-live="polite">対象: 0件</p>
+                <div class="export-card__actions">
+                    <button type="button" id="btnExportCsv" class="btn btn--primary" aria-label="CSVをダウンロード">
+                        CSVをダウンロード
+                    </button>
+                </div>
+                <p id="exportMessage" class="export-message" role="status" aria-live="polite"></p>
+            </div>
         </section>
     </main>
 

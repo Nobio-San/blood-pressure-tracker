@@ -585,6 +585,57 @@ select.form-field__input {
     color: var(--color-muted-light);
 }
 
+/* Phase 4 Step 4-3: エクスポートカード */
+.export-card {
+    margin-top: var(--space-6);
+    padding: var(--space-4);
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+}
+
+.export-card__title {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text);
+    margin-bottom: var(--space-2);
+}
+
+.export-card__desc {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    margin-bottom: var(--space-2);
+}
+
+.export-card__condition,
+.export-card__preview {
+    font-size: var(--font-size-sm);
+    color: var(--color-muted);
+    margin-bottom: var(--space-2);
+}
+
+.export-card__actions {
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-2);
+}
+
+.export-message {
+    font-size: var(--font-size-sm);
+    margin-top: var(--space-2);
+}
+
+.export-message--success {
+    color: var(--color-success);
+}
+
+.export-message--warn {
+    color: var(--color-warning);
+}
+
+.export-message--error {
+    color: var(--color-danger);
+}
+
 /* 一覧リスト */
 .records-list {
     display: flex;
