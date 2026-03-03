@@ -4,7 +4,7 @@
  */
 
 // キャッシュ名（バージョン管理用）
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `bp-cache-${CACHE_VERSION}`;
 
 // プリキャッシュ対象（アプリシェル: 最小限から開始）
@@ -13,9 +13,9 @@ const PRECACHE_URLS = [
     './index.html',
     './css/style.css',
     './js/constants.js',
-    './js/settings.js',
-    './js/notifications.js',
-    './js/reminder.js',
+    './js/settings.js?v=2',
+    './js/notifications.js?v=2',
+    './js/reminder.js?v=2',
     './js/app.js',
     './js/sheets-api.js',
     './manifest.json',
@@ -50,8 +50,7 @@ self.addEventListener('install', (event) => {
             })
             .then(() => {
                 console.log('[SW] プリキャッシュ完了');
-                // 新しいSWをすぐに有効化（今回は基本方針として skipWaiting() は使用しない）
-                // return self.skipWaiting();
+                return self.skipWaiting();
             })
             .catch((error) => {
                 console.error('[SW] プリキャッシュ失敗:', error);
@@ -81,8 +80,7 @@ self.addEventListener('activate', (event) => {
             })
             .then(() => {
                 console.log('[SW] キャッシュクリーンアップ完了');
-                // 既存のクライアントを即座に制御（今回は基本方針として clientsClaim() は使用しない）
-                // return self.clients.claim();
+                return self.clients.claim();
             })
     );
 });

@@ -27,9 +27,9 @@
     <!-- Tesseract.js CDN（バージョン固定: v5.0.3） -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
     <script src="js/constants.js" defer></script>
-    <script src="js/settings.js" defer></script>
-    <script src="js/notifications.js" defer></script>
-    <script src="js/reminder.js" defer></script>
+    <script src="js/settings.js?v=2" defer></script>
+    <script src="js/notifications.js?v=2" defer></script>
+    <script src="js/reminder.js?v=2" defer></script>
     <script src="js/image-preprocess.js" defer></script>
     <script src="js/seven-segment.js" defer></script>
     <script src="js/ocr.js?v=2" defer></script>
@@ -42,19 +42,20 @@
         // 開発環境: 自己署名証明書の場合、Service Workerは正常に登録されないことがあります
         // これは予想される動作であり、アプリ本体の機能には影響しません
         if ('serviceWorker' in navigator && location.protocol === 'https:') {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                window.location.reload();
+            });
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./service-worker.js')
                     .then(registration => {
                         console.log('[SW] 登録成功:', registration.scope);
                         
-                        // SW更新検知（新しいSWが待機中の場合）
                         registration.addEventListener('updatefound', () => {
                             const newWorker = registration.installing;
                             if (newWorker) {
                                 newWorker.addEventListener('statechange', () => {
                                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                                         console.log('[SW] 新しいバージョンが利用可能です');
-                                        // 更新通知は今後のフェーズで実装
                                     }
                                 });
                             }
