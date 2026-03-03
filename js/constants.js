@@ -269,3 +269,28 @@ const GRAPH_CONSTANTS = {
     STORAGE_KEY: 'bp_graph_state_v1'
 };
 window.GRAPH_CONSTANTS = GRAPH_CONSTANTS;
+
+/**
+ * 通知・リマインダー機能 定数（Phase 4 Step 4-4）
+ */
+const NOTIFICATION_CONSTANTS = {
+    STORAGE_KEY: 'bp_settings',
+    SCHEMA_VERSION: 1,
+
+    DEFAULT_MORNING_TIME: '07:00',
+    DEFAULT_EVENING_TIME: '21:00',
+    FREQUENCY_DAILY: 'daily',
+    FREQUENCY_WEEKDAYS: 'weekdays',
+    FREQUENCY_WEEKENDS: 'weekends',
+
+    RECORD_COMPLETE_SUPPRESS_MS: 60000,
+
+    TITLE_RECORD_COMPLETE: '記録が保存されました',
+    BODY_RECORD_COMPLETE: '血圧の記録を保存しました',
+    TITLE_REMINDER: '測定の時間です',
+    BODY_REMINDER_MORNING: '朝の血圧測定をお忘れなく',
+    BODY_REMINDER_EVENING: '夜の血圧測定をお忘れなく',
+    TITLE_REMINDER_FALLBACK: '血圧測定のリマインド',
+    BODY_REMINDER_FALLBACK: '測定時刻を過ぎています。血圧を記録しましょう'
+};
+window.NOTIFICATION_CONSTANTS = NOTIFICATION_CONSTANTS;

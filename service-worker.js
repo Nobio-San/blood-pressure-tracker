@@ -4,7 +4,7 @@
  */
 
 // キャッシュ名（バージョン管理用）
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `bp-cache-${CACHE_VERSION}`;
 
 // プリキャッシュ対象（アプリシェル: 最小限から開始）
@@ -12,6 +12,10 @@ const PRECACHE_URLS = [
     './',
     './index.html',
     './css/style.css',
+    './js/constants.js',
+    './js/settings.js',
+    './js/notifications.js',
+    './js/reminder.js',
     './js/app.js',
     './js/sheets-api.js',
     './manifest.json',
@@ -214,3 +218,48 @@ function isExternalAPI(url) {
 function isCDN(url) {
     return CDN_PATTERNS.some(pattern => url.href.includes(pattern));
 }
+
+/* =========================================
+   notificationclick: 通知タップでアプリをフォーカス/起動（Phase 4 Step 4-4）
+   ========================================= */
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+
+    const urlToOpen = './?from=notification&type=' + (event.notification.data?.type || 'reminder');
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+            .then((clientList) => {
+                for (const client of clientList) {
+                    if (client.url.includes(self.registration.scope) && 'focus' in client) {
+                        client.navigate(urlToOpen);
+                        return client.focus();
+                    }
+                }
+                if (self.clients.openWindow) {
+                    return self.clients.openWindow(urlToOpen);
+                }
+            })
+    );
+});
+
+/* =========================================
+   push: 将来のPush拡張用雛形（Phase 4 Step 4-4）
+   ========================================= */
+self.addEventListener('push', (event) => {
+    if (!event.data) return;
+    try {
+        const payload = event.data.json();
+        const title = payload?.title || '血圧記録アプリ';
+        const options = {
+            body: payload?.body || '',
+            icon: './icons/icon-192.png',
+            data: payload?.data || {}
+        };
+        event.waitUntil(
+            self.registration.showNotification(title, options)
+        );
+    } catch (e) {
+        console.warn('[SW] push payload parse error:', e);
+    }
+});

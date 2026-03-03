@@ -149,6 +149,25 @@ function init() {
     
     // Phase 4 Step 4-3: エクスポートUIの初期化
     initExportUI();
+
+    // Phase 4 Step 4-4: 通知・リマインダー機能の初期化
+    if (typeof window.initNotificationSettingsUI === 'function') {
+        window.initNotificationSettingsUI(
+            () => { if (typeof window.rescheduleReminder === 'function') window.rescheduleReminder(); },
+            () => typeof window.requestNotificationPermission === 'function' ? window.requestNotificationPermission() : Promise.resolve(false)
+        );
+    }
+    if (typeof window.checkReminderFallbackOnStartup === 'function') {
+        window.checkReminderFallbackOnStartup();
+    }
+    if (typeof window.rescheduleReminder === 'function') {
+        window.rescheduleReminder();
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && typeof window.rescheduleReminder === 'function') {
+            window.rescheduleReminder();
+        }
+    });
     
     // 初期表示
     refreshRecordList();
@@ -1017,6 +1036,12 @@ async function handleSubmit(event) {
         // 一覧とグラフを更新
         refreshRecordList();
         refreshChart();
+
+        // Phase 4 Step 4-4: 記録完了通知（許可済みかつ設定ONの場合）
+        if (typeof window.showRecordCompleteNotification === 'function' && typeof window.loadNotificationSettings === 'function') {
+            const settings = window.loadNotificationSettings();
+            window.showRecordCompleteNotification(settings);
+        }
         
         // ========================================
         // ステップ2: Sheets 同期（オンライン時のみ・失敗しても継続）
