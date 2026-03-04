@@ -1,0 +1,220 @@
+```md
+# ProjectRules.md（PWA血圧記録アプリ：オフライン対応の強化）
+
+## 1. 目的とスコープ
+- 目的: PWA（血圧記録アプリ）を**オフラインでも「入力・閲覧・保存」**できるようにし、オンライン復帰時に**Google Sheetsへ自動同期**してデータ欠損を防ぐ。
+- スコープ（やること）:
+  - Service Worker のキャッシュ戦略を明確化（Static / API / Images）
+  - オフライン状態のUI（バナー、同期待ち件数、同期ステータス）
+  - 同期キュー（オフライン保存 → オンライン復帰で自動送信、失敗時リトライ）
+  - （任意）Background Sync（対応環境のみ、フォールバック必須）
+- 非スコープ（やらないこと）:
+  - ビルド導入（Webpack/Vite等）
+  - 仕様外の新機能追加（記録項目の追加、画面大改修など）
+  - Apps Script側の大規模改修（必要なら最小限の冪等性対応のみ）
+
+## 2. 技術スタック
+- フロント: HTML / CSS / JavaScript（ES Modules）
+- PWA: manifest + Service Worker
+- データ保存:
+  - ローカル: localStorage（同期キュー／直近表示データ）
+  - リモート: Google Apps Script WebApp（fetchでPOST送信）
+- 依存/前提:
+  - 既にPWA登録（manifest + service-worker登録）が動作している前提
+  - Sheets送信API（Apps Script）のエンドポイントURLと成功判定条件は既存実装に準拠
+
+## 3. ディレクトリ/ファイル方針
+- 主要ファイル（想定・実装は既存構成に合わせる）:
+  - `/index.html`（バナー/ステータス/件数表示のDOMを配置）
+  - `/css/style.css`（バナー・ステータス表示のスタイル）
+  - `/js/app.js`（オフライン検知、UI更新、保存フロー、キューflush）
+  - `/js/sheets-api.js`（Sheets送信の薄いラッパ、成功判定の統一、例外化）
+  - `/js/constants.js`（キー名、タイムアウト、キャッシュ名、表示文言など）
+  - `/service-worker.js`（キャッシュ戦略の中核）
+  - `/manifest.json` / `/assets/icons/*`（PWA資産）
+- 読み込み順:
+  - HTML → CSS → JS（ES Modules）
+- 定数/設定:
+  - **魔法数・キー名・キャッシュ名・タイムアウト**は `js/constants.js` に集約
+
+## 4. コーディング規約（横断）
+- 命名:
+  - JS: lowerCamelCase / 定数: UPPER_SNAKE_CASE
+  - CSS: BEM（`block__elem--mod`）か Utility のどちらかに統一（混在禁止）
+- 構造:
+  - 定数/設定（constants）・ドメインロジック（同期/キュー）・I/O（fetch/localStorage）・UI更新を層分離
+- コメント:
+  - 原則日本語。関数の**入出力・副作用**を先頭1行で明記
+- 例外/エラーハンドリング:
+  - fetch失敗は「UIが固まらない」を最優先（catchで握りつぶさず、状態をUIへ反映）
+- 依存:
+  - グローバル共有を最小化。UI更新は `updateConnectivityUI()` 等に集約
+
+## 5. 実装ルール（プロジェクト固有）
+
+### 5.1 Service Worker（キャッシュ戦略）
+- キャッシュ名は用途別に分離し、**必ずバージョンを付与**する:
+  - 例: `STATIC_CACHE = 'static-vX'`, `IMAGE_CACHE = 'images-vX'`, `API_CACHE = 'api-vX'`
+- install:
+  - アプリシェル（HTML/CSS/JS/manifest/icons）を**最小限**で precache
+- activate:
+  - 旧バージョンのキャッシュを削除（cache名で判定）
+- fetch（リクエスト種別で分岐）:
+  1) **Navigation（index.html）**
+     - Offline時は確実にキャッシュへフォールバック（アプリが起動できること）
+  2) **Static assets（CSS/JS/icons）: Cache First**
+     - まずキャッシュ、なければネット取得→キャッシュ
+  3) **Images: Cache First**
+     - `request.destination === 'image'` 等で判定
+     - 画像キャッシュは上限を設ける（簡易でOK：古いものから削除）
+  4) **API（GET）: Network First**
+     - オンライン時は最新優先、失敗時はキャッシュ/ローカルへフォールバック
+     - 待ち時間悪化を避けるため**短いタイムアウト**を導入
+  5) **API（POST）: SWでキャッシュしない**
+     - 送信保証は `app.js` の同期キューで担保（SWがPOSTを握らない）
+- CDN依存がある場合:
+  - 可能ならローカル同梱またはSWでキャッシュ対象に含める
+  - 難しい場合はオフライン時に「機能制限」表示（例: OCR/外部ライブラリはネット必須）
+
+### 5.2 オフライン検知とUI
+- 状態監視:
+  - `navigator.onLine` と `window` の `online/offline` イベントで状態を更新
+  - ただし `navigator.onLine` は到達性を保証しないため、**同期の成功/失敗**を別途ステータスに反映
+- 表示要件（最低限）:
+  - 画面上部に固定のオフラインバナー（オンラインで自動非表示）
+  - 「同期待ち: N件」を表示（キューの増減に追従）
+  - 同期中表示（スピナー or 「同期中…」）
+  - 同期成功/失敗の簡易トースト（連打で荒れないよう連続表示は抑制）
+- UI更新の集約:
+  - `renderSyncStatus({ isOnline, pendingCount, isSyncing, lastError })` のように**UI更新関数は1か所**に集約
+
+### 5.3 同期キュー（localStorage版・必須）
+- キュー形式（例）:
+  - `pendingQueue = [{ id, payload, createdAt, retryCount, lastTriedAt }]`
+- 追加ルール:
+  - オフライン時、またはSheets送信失敗時にキューへ追加
+  - 同一 `id` は重複追加しない（追加前に存在チェック）
+  - `id` は不変（クライアントで生成し、再送しても同じ）
+- flush（再送）ルール:
+  - トリガ:
+    - `online` イベント
+    - アプリ起動時（初期化完了後に1回）
+    - （任意）ユーザー操作「今すぐ同期」ボタン
+  - 送信方式:
+    - 逐次送信（1件ずつ）
+    - 成功したものはキューから削除
+    - 失敗したものは `retryCount++`、`lastTriedAt` 更新
+    - 最低限のバックオフ（例: `min(2^retryCount * BASE_MS, MAX_MS)`）
+  - 排他:
+    - `isFlushing` フラグで多重起動禁止（online連打/多タブを想定）
+- 成功判定（統一）:
+  - `sheets-api.js` で「成功条件」を1か所に集約
+  - 例: `response.ok && json.status === 'success'` のように明文化
+  - TODO: 既存APIレスポンス仕様（成功時のJSON/ステータス）を確認し反映
+- 送信失敗時のUX:
+  - 入力保存自体は成功させる（ローカル保存＋キュー）
+  - 失敗はUIに「同期待ち件数」と「最終エラー」を表示（詳細ログはデバッグのみ）
+- 容量対策:
+  - localStorage容量制限を前提に、キューは「未送信のみ」かつ最小payloadにする
+  - 画像など巨大データはキューに入れない（必要なら別設計：IndexedDB等）
+
+### 5.4 重複送信・整合性
+- クライアント側（必須）:
+  - `id` の一意性と不変性
+  - キュー追加/送信前に `id` で重複排除
+- サーバ側（推奨・最小変更）:
+  - Apps Script（doPost）で `id` が既に存在する場合は appendしない/上書きする（どちらか）
+  - TODO: 行数増加時の検索コストを踏まえ、実装有無を決める
+
+### 5.5 Background Sync（任意・progressive enhancement）
+- 対応判定:
+  - `('serviceWorker' in navigator) && ('SyncManager' in window)` 等で判定
+- 対応環境のみ:
+  - sync登録 → SWの `sync` イベントで flush を実行
+- 非対応/期待通り動かない環境:
+  - **必ずフォールバック**（onlineイベント/起動時flush）が主ルート
+
+## 6. UI/UX・入力操作の規約
+- バナー/ステータス表示は視認性優先（常時表示ではなく状態に応じて切替）
+- アクセシビリティ:
+  - バナーは `role="status"` もしくは `aria-live="polite"`
+  - 同期待ち件数はスクリーンリーダーで読めるテキストとして表示
+- 表示の一貫性:
+  - 「オフライン」＝ネットワーク断
+  - 「同期失敗」＝オンラインでも到達/POST失敗（別ラベルで区別）
+
+## 7. パフォーマンス/品質
+- SWキャッシュ:
+  - 静的キャッシュは最小限。画像/APIは別キャッシュで肥大化を抑制
+  - キャッシュ更新の混乱を避けるため、**バージョン更新時の削除を必ず実装**
+- API:
+  - Network Firstの待ち時間対策としてタイムアウトを設定（例: 3〜5秒）
+- ログ:
+  - `DEBUG` フラグでON/OFF（本番でconsole spamしない）
+
+## 8. テスト/デバッグ（DoD：達成条件）
+以下が再現性をもって成功すること。
+- オフライン入力:
+  - オフライン状態で記録追加しても失敗せず、ローカル保存＋キュー追加される
+- オフライン閲覧:
+  - オフラインでアプリ起動でき、一覧/グラフが少なくとも直近データで表示できる
+- 自動同期:
+  - オフラインで複数件（例: 5件）保存 → オンライン復帰で自動的に順次POSTされ、成功後キューが0になる
+- 失敗→再送:
+  - 「オンラインだがPOST失敗」ケースでもキューに残り、後で復帰したら送れる
+- 多重送信防止:
+  - onlineイベント連打/画面再読み込みでも同一idが二重送信されにくい（少なくともクライアント側で重複排除）
+- SW更新:
+  - `CACHE_VERSION` 更新後に旧キャッシュが削除され、新しい版が正常に起動する
+- 実機確認:
+  - Android Chrome（PWAインストール状態）で、機内モードON/OFFでUI切替と同期が破綻しない
+
+## 9. リリース/更新運用
+- ルール更新:
+  - 設計/Plan（本プロジェクトの計画md）更新 → 本ルールへ差分反映（特に **キャッシュ対象/成功判定/タイムアウト/ファイル構成**）
+- SW更新運用:
+  - `CACHE_VERSION` を上げる → activateで旧キャッシュ削除
+  - 開発時の混乱回避: DevToolsで Service Worker / Cache Storage を確認し、必要なら手動クリア手順をREADMEに残す
+- 受け入れテスト:
+  - リリース前に「Step6のE2Eシナリオ」を実機で必ず実施
+
+## 10. 禁止事項/アンチパターン
+- 指定なしでの外部FW導入（React/Vue等）
+- SWでPOSTをキャッシュ/再送しようとする（送信保証はキューで担保）
+- キャッシュ名のバージョン無し運用（更新地獄の原因）
+- `navigator.onLine` のみで「到達性OK」とみなす（同期結果と分離する）
+- 魔法数散在（キー名/タイムアウト/キャッシュ名/文言はconstantsへ）
+- localStorageに巨大payload（画像Base64等）を突っ込む（必要なら設計変更）
+
+## 11. コミット/PR運用（任意）
+- 1コミット=1意図（SW、UI、キューなど機能単位で分ける）
+- メッセージは日本語で「目的→変更→影響範囲」
+- PR/Issueの確認観点:
+  - Offline/Online切替手順
+  - 追加したキャッシュ対象
+  - キュー件数の変化と同期結果
+
+---
+
+### 付録A: 設定（constants.js）に集約する項目例
+- `CACHE_VERSION`, `STATIC_CACHE`, `IMAGE_CACHE`, `API_CACHE`
+- `API_TIMEOUT_MS`, `RETRY_BASE_MS`, `RETRY_MAX_MS`
+- `LS_KEY_PENDING_QUEUE`, `LS_KEY_LATEST_RECORDS`
+- `TOAST_DURATION_MS`
+
+### 付録B: 未確定点（TODO: ???）
+- 現在の `service-worker.js` 実装（precache対象、fetchハンドリング有無）
+- Apps Script WebApp のエンドポイントURLと成功判定（HTTP/JSON）
+- Sheets取得（GET）の有無と仕様（キャッシュ/フォールバック設計に影響）
+- 画像等の外部取得有無（imageキャッシュ戦略／localStorage容量に影響）
+```
+
+```md
+# 生成ログ（短い要約）
+- オフラインでも「起動・入力・閲覧」を成立させるため、SWを Static:Cache First / API(GET):Network First / Images:Cache First に分離し、POSTはSWで扱わない方針に正規化。
+- 同期保証は localStorage の同期キュー（id不変・重複排除・逐次送信・排他・最小バックオフ）で担保するルールに落とし込み。
+- UIはオフラインバナー＋同期待ち件数＋同期中/結果トーストを必須化し、UI更新関数の集約を規約化。
+- DoDは「オフライン→複数件保存→オンライン復帰で自動同期」「オンラインだがPOST失敗→後で再送」「SW更新で旧キャッシュ削除」を実機（Android Chrome）中心に定義。
+- 未確定点として、既存SW実装・Apps Script成功判定・GET有無・画像取得有無を TODO 化。
+```
+

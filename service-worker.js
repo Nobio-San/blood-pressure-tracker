@@ -3,11 +3,14 @@
  * 目的: オフライン時にもアプリシェル（HTML/CSS/JS）を表示できるようにする
  */
 
-// キャッシュ名（バージョン管理用）
-const CACHE_VERSION = 'v5';
-const CACHE_NAME = `bp-cache-${CACHE_VERSION}`;
+// キャッシュ名（バージョン管理用・用途別分離）
+const CACHE_VERSION = 'v6';
+const STATIC_CACHE = `bp-static-${CACHE_VERSION}`;
+const IMAGE_CACHE = `bp-images-${CACHE_VERSION}`;
+const API_CACHE = `bp-api-${CACHE_VERSION}`;
+const CACHE_NAME = STATIC_CACHE;
 
-// プリキャッシュ対象（アプリシェル: 最小限から開始）
+// プリキャッシュ対象（アプリシェル: 最小限）
 const PRECACHE_URLS = [
     './',
     './index.html',
@@ -16,8 +19,11 @@ const PRECACHE_URLS = [
     './js/settings.js?v=2',
     './js/notifications.js?v=2',
     './js/reminder.js?v=2',
-    './js/app.js',
-    './js/sheets-api.js',
+    './js/image-preprocess.js',
+    './js/seven-segment.js',
+    './js/ocr.js?v=2',
+    './js/app.js?v=3',
+    './js/sheets-api.js?v=3',
     './manifest.json',
     './icons/icon-192.png',
     './icons/icon-512.png',
@@ -68,10 +74,10 @@ self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
             .then((cacheNames) => {
+                const currentCaches = [STATIC_CACHE, IMAGE_CACHE, API_CACHE];
                 return Promise.all(
                     cacheNames.map((cacheName) => {
-                        // 現在のバージョン以外のキャッシュを削除
-                        if (cacheName !== CACHE_NAME) {
+                        if (!currentCaches.includes(cacheName)) {
                             console.log('[SW] 古いキャッシュを削除:', cacheName);
                             return caches.delete(cacheName);
                         }
@@ -85,6 +91,10 @@ self.addEventListener('activate', (event) => {
     );
 });
 
+// API Network First タイムアウト（ミリ秒）
+const API_TIMEOUT_MS = 5000;
+const IMAGE_CACHE_MAX_ENTRIES = 50;
+
 /* =========================================
    fetch: リクエストのキャッシュ戦略
    ========================================= */
@@ -92,69 +102,64 @@ self.addEventListener('fetch', (event) => {
     const { request } = event;
     const url = new URL(request.url);
     
-    // GETリクエストのみ対象（POST等は触らない）
+    // POSTはキャッシュ対象外（同期キューで担保）
     if (request.method !== 'GET') {
         return;
     }
     
-    // http/https 以外のスキームはスキップ
-    // chrome-extension:// 等はCache APIが対応しないためエラーになる
     if (!request.url.startsWith('http')) {
         return;
     }
     
-    // 外部API（Google Apps Script等）は常にネットワーク
     if (isExternalAPI(url)) {
-        console.log('[SW] 外部API（キャッシュ対象外）:', url.href);
         event.respondWith(fetch(request));
         return;
     }
     
-    // CDNは基本的にネットワーク優先（オフライン時はキャッシュがあれば使う）
     if (isCDN(url)) {
-        event.respondWith(networkFirstStrategy(request));
+        event.respondWith(networkFirstWithTimeout(request, API_CACHE, API_TIMEOUT_MS));
         return;
     }
     
-    // 静的アセット（HTML/CSS/JS/画像）はCache First
-    event.respondWith(cacheFirstStrategy(request));
+    if (request.destination === 'image') {
+        event.respondWith(cacheFirstStrategy(request, IMAGE_CACHE));
+        return;
+    }
+    
+    event.respondWith(cacheFirstStrategy(request, STATIC_CACHE));
 });
 
 /* =========================================
    キャッシュ戦略: Cache First
    ========================================= */
-async function cacheFirstStrategy(request) {
+async function cacheFirstStrategy(request, cacheName) {
+    const cacheToUse = cacheName || STATIC_CACHE;
     try {
-        // 1. キャッシュを確認
         const cachedResponse = await caches.match(request);
         if (cachedResponse) {
-            console.log('[SW] キャッシュヒット:', request.url);
             return cachedResponse;
         }
         
-        // 2. キャッシュになければネットワークから取得
-        console.log('[SW] ネットワークから取得:', request.url);
         const networkResponse = await fetch(request);
         
-        // 3. 正常なレスポンスならキャッシュに保存
         if (networkResponse && networkResponse.status === 200) {
-            const cache = await caches.open(CACHE_NAME);
+            const cache = await caches.open(cacheToUse);
+            if (cacheToUse === IMAGE_CACHE) {
+                await trimImageCacheIfNeeded(cache);
+            }
             cache.put(request, networkResponse.clone());
         }
         
         return networkResponse;
         
     } catch (error) {
-        console.error('[SW] fetch エラー:', request.url, error);
-        
-        // オフライン時のフォールバック: トップページを返す
-        const cachedFallback = await caches.match('./index.html');
-        if (cachedFallback) {
-            console.log('[SW] オフラインフォールバック: index.html');
-            return cachedFallback;
+        if (request.mode === 'navigate') {
+            const cachedFallback = await caches.match('./index.html');
+            if (cachedFallback) {
+                return cachedFallback;
+            }
         }
         
-        // 最終フォールバック: エラーレスポンス
         return new Response('オフラインです。ネットワーク接続を確認してください。', {
             status: 503,
             statusText: 'Service Unavailable',
@@ -165,32 +170,36 @@ async function cacheFirstStrategy(request) {
     }
 }
 
+async function trimImageCacheIfNeeded(cache) {
+    const keys = await cache.keys();
+    if (keys.length >= IMAGE_CACHE_MAX_ENTRIES) {
+        await cache.delete(keys[0]);
+    }
+}
+
 /* =========================================
-   キャッシュ戦略: Network First
+   キャッシュ戦略: Network First（タイムアウト付き）
    ========================================= */
-async function networkFirstStrategy(request) {
+async function networkFirstWithTimeout(request, cacheName, timeoutMs) {
+    const cacheToUse = cacheName || API_CACHE;
     try {
-        // 1. ネットワークから取得を試みる
-        const networkResponse = await fetch(request);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        const networkResponse = await fetch(request, { signal: controller.signal });
+        clearTimeout(timeoutId);
         
-        // 2. 正常なレスポンスならキャッシュに保存
         if (networkResponse && networkResponse.status === 200) {
-            const cache = await caches.open(CACHE_NAME);
+            const cache = await caches.open(cacheToUse);
             cache.put(request, networkResponse.clone());
         }
         
         return networkResponse;
         
     } catch (error) {
-        console.error('[SW] ネットワークエラー:', request.url, error);
-        
-        // 3. ネットワーク失敗時はキャッシュから返す
         const cachedResponse = await caches.match(request);
         if (cachedResponse) {
-            console.log('[SW] キャッシュフォールバック:', request.url);
             return cachedResponse;
         }
-        
         throw error;
     }
 }
@@ -239,6 +248,25 @@ self.addEventListener('notificationclick', (event) => {
                 }
             })
     );
+});
+
+/* =========================================
+   sync: Background Sync（Phase 4 Step 4-5・対応環境のみ）
+   ========================================= */
+self.addEventListener('sync', (event) => {
+    if (event.tag === 'bp-sync') {
+        event.waitUntil(
+            self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+                .then((clientList) => {
+                    for (const client of clientList) {
+                        if (client.url.includes(self.registration.scope)) {
+                            client.postMessage({ type: 'flushSyncQueue' });
+                            break;
+                        }
+                    }
+                })
+        );
+    }
 });
 
 /* =========================================

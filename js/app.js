@@ -39,7 +39,8 @@ const VALIDATION = {
    グローバル状態
    ========================================= */
 let records = [];
-let isResyncInProgress = false; // 再同期中フラグ（二重実行防止）
+let isFlushingSyncQueue = false; // 同期キューflush中フラグ（Phase 4 Step 4-5）
+let lastSyncError = null; // 最終同期エラー（UI表示用）
 let bpChartInstance = null; // Chart.js インスタンス（描画/更新用）
 
 // Phase 2 Step 2-4: 画像状態管理
@@ -138,8 +139,12 @@ function init() {
     // グラフ機能強化 初期化（Phase 4 Step 4-2）
     initGraphControls();
     
-    // オフライン検知の初期化
+    // オフライン検知・同期キューの初期化（Phase 4 Step 4-5）
     initOfflineDetection();
+    hydrateQueueFromUnsyncedRecords();
+    renderSyncStatus({});
+    flushSyncQueue();
+    registerBackgroundSyncIfAvailable();
     
     // Phase 2 Step 2-4: 画像プレビュー機能の初期化
     initImagePreview();
@@ -845,15 +850,16 @@ function countUnsyncedRecords() {
 
 /**
  * 未同期UIを更新（再同期ボタンの表示/非表示と件数表示）
+ * Phase 4 Step 4-5: キュー件数を優先表示
  */
 function updateUnsyncedUI() {
     const btnResync = document.getElementById('btnResync');
     const unsyncedCount = document.getElementById('unsyncedCount');
-    
+
     if (!btnResync) return;
-    
-    const count = countUnsyncedRecords();
-    
+
+    const count = Math.max(getPendingQueue().length, countUnsyncedRecords());
+
     if (count > 0) {
         btnResync.style.display = 'inline-block';
         if (unsyncedCount) {
@@ -862,90 +868,28 @@ function updateUnsyncedUI() {
     } else {
         btnResync.style.display = 'none';
     }
+    renderSyncStatus({});
 }
 
 /**
- * 未同期レコードを再送信（手動リトライ）
+ * 未同期レコードを再送信（手動リトライ・Phase 4 Step 4-5ではキューflushを利用）
  */
 async function handleResync() {
-    if (isResyncInProgress) {
-        console.log('[resync] 既に再同期処理が実行中です');
+    if (isFlushingSyncQueue) {
+        console.log('[resync] 既に同期処理が実行中です');
         return;
     }
-    
-    const btnResync = document.getElementById('btnResync');
-    const originalText = btnResync ? btnResync.textContent : '';
-    
-    try {
-        isResyncInProgress = true;
-        
-        // ボタンを無効化
-        if (btnResync) {
-            btnResync.disabled = true;
-            btnResync.textContent = '同期中...';
-        }
-        
-        // 未同期レコードを取得
-        const allRecords = loadRecords();
-        const unsyncedRecords = allRecords.filter(r => !r.synced);
-        
-        console.log(`[resync] 未同期レコード: ${unsyncedRecords.length}件`);
-        
-        if (unsyncedRecords.length === 0) {
-            showMessage('success', '未同期のレコードはありません');
-            return;
-        }
-        
-        // 1件ずつ送信（間隔を空ける）
-        let successCount = 0;
-        let failCount = 0;
-        
-        for (let i = 0; i < unsyncedRecords.length; i++) {
-            const record = unsyncedRecords[i];
-            
-            console.log(`[resync] ${i + 1}/${unsyncedRecords.length} 件目を送信中...`);
-            
-            const success = await syncRecordToSheets(record);
-            
-            if (success) {
-                successCount++;
-            } else {
-                failCount++;
-                // 失敗したら停止
-                console.error(`[resync] ${i + 1}件目で失敗したため、再同期を中断します`);
-                break;
-            }
-            
-            // 次のレコードまで間隔を空ける（最後は不要）
-            if (i < unsyncedRecords.length - 1) {
-                await sleep(SYNC_RETRY_INTERVAL_MS);
-            }
-        }
-        
-        // 結果を表示
-        if (failCount === 0) {
-            showMessage('success', `${successCount}件の記録を同期しました`);
-        } else {
-            showMessage('warn', `${successCount}件成功、${failCount}件失敗しました。ネットワーク状態を確認してください。`);
-        }
-        
-        // UI更新
-        refreshRecordList();
-        
-    } catch (error) {
-        console.error('[resync] 再同期エラー:', error);
-        showMessage('error', '再同期中にエラーが発生しました');
-    } finally {
-        isResyncInProgress = false;
-        
-        // ボタンを元に戻す
-        if (btnResync) {
-            btnResync.disabled = false;
-            btnResync.textContent = originalText;
-        }
-        
-        updateUnsyncedUI();
+    if (!navigator.onLine) {
+        showMessage('warn', 'オフラインです。ネットワーク接続を確認してください。');
+        return;
     }
+    hydrateQueueFromUnsyncedRecords();
+    const queue = getPendingQueue();
+    if (queue.length === 0) {
+        showMessage('success', '未同期のレコードはありません');
+        return;
+    }
+    await flushSyncQueue();
 }
 
 /**
@@ -955,6 +899,246 @@ async function handleResync() {
  */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/* =========================================
+   同期キュー（Phase 4 Step 4-5）
+   ========================================= */
+
+function getSyncConstants() {
+    return (typeof SYNC_CONSTANTS !== 'undefined' && SYNC_CONSTANTS) ? SYNC_CONSTANTS : {
+        LS_KEY_PENDING_QUEUE: 'bp_pending_queue_v1',
+        RETRY_BASE_MS: 1000,
+        RETRY_MAX_MS: 30000,
+        TOAST_DURATION_MS: 3000
+    };
+}
+
+/**
+ * 同期キューをlocalStorageから取得
+ * @returns {Array} [{ id, payload, createdAt, retryCount, lastTriedAt }]
+ */
+function getPendingQueue() {
+    const c = getSyncConstants();
+    try {
+        const json = localStorage.getItem(c.LS_KEY_PENDING_QUEUE);
+        return json ? JSON.parse(json) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * 同期キューをlocalStorageに保存
+ * @param {Array} queue - キュー配列
+ */
+function savePendingQueue(queue) {
+    const c = getSyncConstants();
+    try {
+        localStorage.setItem(c.LS_KEY_PENDING_QUEUE, JSON.stringify(queue));
+    } catch (e) {
+        console.warn('[sync] キュー保存失敗:', e);
+    }
+}
+
+/**
+ * レコードを同期キューに追加（同一idは重複追加しない）
+ * @param {Object} record - BpRecord
+ */
+function addToSyncQueue(record) {
+    const queue = getPendingQueue();
+    if (queue.some(item => item.id === record.id)) return;
+    const payload = {
+        id: record.id,
+        datetimeIso: record.datetimeIso,
+        member: record.member,
+        systolic: record.systolic,
+        diastolic: record.diastolic,
+        pulse: record.pulse
+    };
+    queue.push({
+        id: record.id,
+        payload,
+        createdAt: Date.now(),
+        retryCount: 0,
+        lastTriedAt: null
+    });
+    savePendingQueue(queue);
+}
+
+/**
+ * キューから指定idを削除
+ * @param {string} id - レコードid
+ */
+function removeFromSyncQueueById(id) {
+    const queue = getPendingQueue().filter(item => item.id !== id);
+    savePendingQueue(queue);
+}
+
+/**
+ * 未同期レコードをキューに反映（起動時・既存データ互換）
+ */
+function hydrateQueueFromUnsyncedRecords() {
+    const allRecords = loadRecords();
+    const unsynced = allRecords.filter(r => !r.synced);
+    const queue = getPendingQueue();
+    const queueIds = new Set(queue.map(item => item.id));
+    let added = 0;
+    for (const record of unsynced) {
+        if (!queueIds.has(record.id)) {
+            addToSyncQueue(record);
+            added++;
+        }
+    }
+    if (added > 0) {
+        console.log('[sync] キューに未同期レコードを反映:', added, '件');
+    }
+}
+
+/**
+ * 同期キューをflush（オンライン時・起動時・Background Sync）
+ * 副作用: キューから成功分を削除、レコードのsyncedを更新、UI更新
+ */
+async function flushSyncQueue() {
+    if (isFlushingSyncQueue) return;
+    if (!navigator.onLine) return;
+
+    isFlushingSyncQueue = true;
+    lastSyncError = null;
+    renderSyncStatus({ isSyncing: true });
+
+    const c = getSyncConstants();
+    let successCount = 0;
+    let failCount = 0;
+
+    while (true) {
+        const queue = getPendingQueue();
+        if (queue.length === 0) break;
+
+        const item = queue[0];
+        const backoff = Math.min(
+            Math.pow(2, item.retryCount) * c.RETRY_BASE_MS,
+            c.RETRY_MAX_MS
+        );
+        if (item.lastTriedAt && Date.now() - item.lastTriedAt < backoff) break;
+
+        const recordForSheets = {
+            id: item.payload.id,
+            datetimeIso: item.payload.datetimeIso,
+            member: item.payload.member,
+            systolic: item.payload.systolic,
+            diastolic: item.payload.diastolic,
+            pulse: item.payload.pulse
+        };
+
+        try {
+            const result = await saveToSheets(recordForSheets);
+            if (result && result.ok) {
+                removeFromSyncQueueById(item.id);
+                const allRecords = loadRecords();
+                const idx = allRecords.findIndex(r => r.id === item.id);
+                if (idx !== -1) {
+                    allRecords[idx].synced = true;
+                    allRecords[idx].syncedAt = new Date().toISOString();
+                    saveRecords(allRecords);
+                }
+                successCount++;
+            } else {
+                item.retryCount++;
+                item.lastTriedAt = Date.now();
+                const newQueue = queue.map(q => q.id === item.id ? item : q);
+                savePendingQueue(newQueue);
+                failCount++;
+                lastSyncError = (result && result.error) || '送信失敗';
+            }
+        } catch (err) {
+            item.retryCount++;
+            item.lastTriedAt = Date.now();
+            const newQueue = queue.map(q => q.id === item.id ? item : q);
+            savePendingQueue(newQueue);
+            failCount++;
+            lastSyncError = err.message || 'ネットワークエラー';
+        }
+
+        await sleep(SYNC_RETRY_INTERVAL_MS);
+    }
+
+    isFlushingSyncQueue = false;
+    renderSyncStatus({ isSyncing: false, lastError: lastSyncError });
+
+    if (successCount > 0) {
+        refreshRecordList();
+        refreshChart();
+        updateUnsyncedUI();
+        showSyncToast('success', `${successCount}件を同期しました`);
+    }
+    if (failCount > 0) {
+        showSyncToast('error', lastSyncError || '同期に失敗しました');
+    }
+}
+
+/**
+ * 同期ステータスUIを更新（集約関数）
+ * @param {Object} opts - { isOnline, pendingCount, isSyncing, lastError }
+ */
+function renderSyncStatus(opts) {
+    const isOnline = opts.isOnline !== undefined ? opts.isOnline : navigator.onLine;
+    const pendingCount = opts.pendingCount !== undefined ? opts.pendingCount : getPendingQueue().length;
+    const isSyncing = opts.isSyncing !== undefined ? opts.isSyncing : isFlushingSyncQueue;
+    const lastError = opts.lastError !== undefined ? opts.lastError : lastSyncError;
+
+    const bar = document.getElementById('syncStatusBar');
+    const text = document.getElementById('syncStatusText');
+    const spinner = document.getElementById('syncStatusSpinner');
+
+    if (!bar || !text) return;
+
+    if (pendingCount > 0 || isSyncing) {
+        bar.style.display = 'flex';
+        if (isSyncing) {
+            text.textContent = '同期中…';
+            if (spinner) spinner.style.display = 'inline-block';
+        } else {
+            text.textContent = `同期待ち: ${pendingCount}件`;
+            if (spinner) spinner.style.display = 'none';
+        }
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+/**
+ * Background Sync を登録（対応環境のみ・Phase 4 Step 4-5）
+ */
+function registerBackgroundSyncIfAvailable() {
+    if (!('serviceWorker' in navigator) || !('SyncManager' in window)) return;
+    navigator.serviceWorker.ready.then((registration) => {
+        if (registration.sync) {
+            registration.sync.register('bp-sync').then(() => {
+                console.log('[sync] Background Sync 登録済み');
+            }).catch((err) => {
+                console.warn('[sync] Background Sync 登録失敗:', err);
+            });
+        }
+    }).catch(() => {});
+}
+
+/**
+ * 同期結果トーストを表示
+ * @param {string} type - 'success' | 'error'
+ * @param {string} message - 表示メッセージ
+ */
+function showSyncToast(type, message) {
+    const toast = document.getElementById('syncToast');
+    if (!toast) return;
+    const c = getSyncConstants();
+    toast.textContent = message;
+    toast.className = 'sync-toast sync-toast--' + type;
+    toast.style.display = 'block';
+    clearTimeout(window._syncToastTimer);
+    window._syncToastTimer = setTimeout(() => {
+        toast.style.display = 'none';
+    }, c.TOAST_DURATION_MS);
 }
 
 /* =========================================
@@ -1043,17 +1227,24 @@ async function handleSubmit(event) {
         }
         
         // ========================================
-        // ステップ2: Sheets 同期（オンライン時のみ・失敗しても継続）
+        // ステップ2: Sheets 同期（オンライン時のみ・失敗時はキューへ）
         // ========================================
-        const syncSuccess = await syncRecordToSheets(record);
-        
-        if (syncSuccess) {
-            showMessage('success', 'ローカルに保存し、クラウドに同期しました');
-            // 一覧を再更新（同期状態の反映）
-            refreshRecordList();
-            // グラフは既に更新済み
+        if (!navigator.onLine) {
+            addToSyncQueue(record);
+            renderSyncStatus({});
+            updateUnsyncedUI();
+            showMessage('warn', 'ローカルに保存しました（オフラインのため同期は後で自動実行されます）');
         } else {
-            showMessage('warn', 'ローカルに保存しました（クラウド同期は失敗しました。後で「未同期を再送」ボタンから再試行できます）');
+            const syncSuccess = await syncRecordToSheets(record);
+            if (syncSuccess) {
+                showMessage('success', 'ローカルに保存し、クラウドに同期しました');
+                refreshRecordList();
+            } else {
+                addToSyncQueue(record);
+                renderSyncStatus({});
+                updateUnsyncedUI();
+                showMessage('warn', 'ローカルに保存しました（クラウド同期は失敗しました。オンライン復帰時に自動で再送されます）');
+            }
         }
         
         // Phase 2 Step 2-4: 記録保存成功後に画像をクリア
@@ -1777,43 +1968,49 @@ function refreshChart() {
 
 /**
  * オフライン検知の初期化
- * 目的: navigator.onLineとonline/offlineイベントでオフライン状態を通知する
+ * 目的: navigator.onLineとonline/offlineイベントでオフライン状態を通知し、オンライン復帰時にキューflush
  */
 function initOfflineDetection() {
     const offlineBanner = document.getElementById('offlineBanner');
-    
-    if (!offlineBanner) {
-        console.warn('[Offline] オフラインバナー要素が見つかりません');
-        return;
+
+    function updateOfflineUI() {
+        if (!offlineBanner) return;
+        if (navigator.onLine) {
+            offlineBanner.classList.remove('offline-banner--visible');
+        } else {
+            offlineBanner.classList.add('offline-banner--visible');
+        }
+        renderSyncStatus({});
     }
-    
-    // 初期状態を反映
+
     updateOfflineUI();
-    
-    // オンライン/オフラインイベントを監視
-    window.addEventListener('online', updateOfflineUI);
+    window.addEventListener('online', () => {
+        updateOfflineUI();
+        flushSyncQueue();
+    });
     window.addEventListener('offline', updateOfflineUI);
-    
-    console.log('[Offline] オフライン検知を初期化しました');
+
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'flushSyncQueue') {
+                flushSyncQueue();
+            }
+        });
+    }
 }
 
 /**
- * オフラインUIの状態を更新
+ * オフラインUIの状態を更新（他モジュールから呼び出し用）
  */
 function updateOfflineUI() {
     const offlineBanner = document.getElementById('offlineBanner');
-    
     if (!offlineBanner) return;
-    
     if (navigator.onLine) {
-        // オンライン時はバナーを非表示
         offlineBanner.classList.remove('offline-banner--visible');
-        console.log('[Offline] オンライン状態');
     } else {
-        // オフライン時はバナーを表示
         offlineBanner.classList.add('offline-banner--visible');
-        console.log('[Offline] オフライン状態');
     }
+    renderSyncStatus({});
 }
 
 /* =========================================

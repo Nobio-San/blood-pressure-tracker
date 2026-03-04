@@ -119,6 +119,60 @@ header h1 {
     margin-right: var(--space-2);
 }
 
+/* Phase 4 Step 4-5: 同期ステータスバー */
+.sync-status-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    background-color: #e8f0fe;
+    color: #1a3a6b;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    box-shadow: var(--shadow-sm);
+}
+
+.sync-status-bar__text {
+    flex: 1;
+}
+
+.sync-status-bar__spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(26, 58, 107, 0.3);
+    border-top-color: #1a3a6b;
+    border-radius: 50%;
+    animation: ocr-spin 0.8s linear infinite;
+}
+
+.sync-toast {
+    position: fixed;
+    bottom: var(--space-6);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    box-shadow: var(--shadow-md);
+    z-index: 2000;
+    max-width: 90%;
+}
+
+.sync-toast--success {
+    background-color: var(--color-success);
+    color: var(--color-primary-contrast);
+}
+
+.sync-toast--error {
+    background-color: var(--color-danger);
+    color: var(--color-primary-contrast);
+}
+
 /* メインコンテナ */
 #app {
     max-width: 560px;

@@ -81,6 +81,15 @@
         <span>オフラインモード - インターネット接続がありません</span>
     </div>
     
+    <!-- 同期ステータスバー（Phase 4 Step 4-5） -->
+    <div id="syncStatusBar" class="sync-status-bar" role="status" aria-live="polite" style="display: none;">
+        <span id="syncStatusText" class="sync-status-bar__text">同期待ち: 0件</span>
+        <span id="syncStatusSpinner" class="sync-status-bar__spinner" aria-hidden="true" style="display: none;"></span>
+    </div>
+    
+    <!-- 同期トースト（成功/失敗表示） -->
+    <div id="syncToast" class="sync-toast" role="status" aria-live="polite" style="display: none;"></div>
+    
     <header>
         <h1>
             <span class="header__icon" aria-hidden="true">

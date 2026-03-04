@@ -294,3 +294,15 @@ const NOTIFICATION_CONSTANTS = {
     BODY_REMINDER_FALLBACK: '測定時刻を過ぎています。血圧を記録しましょう'
 };
 window.NOTIFICATION_CONSTANTS = NOTIFICATION_CONSTANTS;
+
+/**
+ * オフライン・同期機能 定数（Phase 4 Step 4-5）
+ */
+const SYNC_CONSTANTS = {
+    LS_KEY_PENDING_QUEUE: 'bp_pending_queue_v1',
+    RETRY_BASE_MS: 1000,
+    RETRY_MAX_MS: 30000,
+    TOAST_DURATION_MS: 3000,
+    API_TIMEOUT_MS: 5000
+};
+window.SYNC_CONSTANTS = SYNC_CONSTANTS;
