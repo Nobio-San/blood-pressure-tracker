@@ -54,6 +54,25 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 /**
+ * ISO日時文字列を日本時間（JST）で "yyyy/mm/dd hh:mm:ss" 形式に変換
+ * @param {string} datetimeIso - ISO 8601形式の日時文字列（UTC）
+ * @returns {string} JST形式の日時文字列（yyyy/mm/dd hh:mm:ss）
+ */
+function formatDateTimeJst(datetimeIso) {
+    if (!datetimeIso) return '';
+    const date = new Date(datetimeIso);
+    if (isNaN(date.getTime())) return '';
+    const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+    const year = jst.getUTCFullYear();
+    const month = String(jst.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(jst.getUTCDate()).padStart(2, '0');
+    const hours = String(jst.getUTCHours()).padStart(2, '0');
+    const minutes = String(jst.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(jst.getUTCSeconds()).padStart(2, '0');
+    return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
  * SCRIPT_URL が設定されているかチェック
  * @throws {Error} 未設定の場合
  */
@@ -78,10 +97,11 @@ async function saveToSheets(record) {
         checkScriptUrl();
         
         // URLパラメータとして送信（CORS問題を回避）
+        // 日時はJST形式（yyyy/mm/dd hh:mm:ss）で送信
         const params = new URLSearchParams({
             action: 'save',
             id: record.id,
-            datetime: record.datetimeIso,
+            datetime: formatDateTimeJst(record.datetimeIso),
             member: record.member,
             systolic: record.systolic,
             diastolic: record.diastolic,
@@ -90,7 +110,7 @@ async function saveToSheets(record) {
         
         const url = `${SCRIPT_URL}?${params.toString()}`;
         
-        console.log('[sheets-api] GET 保存開始:', { id: record.id, datetime: record.datetimeIso });
+        console.log('[sheets-api] GET 保存開始:', { id: record.id, datetime: formatDateTimeJst(record.datetimeIso) });
         
         // GET リクエスト
         const response = await fetchWithTimeout(
