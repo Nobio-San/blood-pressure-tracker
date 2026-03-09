@@ -125,6 +125,16 @@ function init() {
         filterSelect.addEventListener('change', refreshRecordList);
     }
     
+    // 記録一覧の表示/非表示切り替え
+    const btnToggleRecordList = document.getElementById('btnToggleRecordList');
+    if (btnToggleRecordList && recordListContainer) {
+        btnToggleRecordList.addEventListener('click', () => {
+            const isHidden = recordListContainer.style.display === 'none';
+            recordListContainer.style.display = isHidden ? '' : 'none';
+            btnToggleRecordList.textContent = isHidden ? '一覧を非表示' : '一覧を表示';
+        });
+    }
+    
     // 削除ボタンのイベント委譲
     if (recordListContainer) {
         recordListContainer.addEventListener('click', handleDelete);

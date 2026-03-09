@@ -617,6 +617,12 @@ select.form-field__input {
     flex: 1;
 }
 
+.records-filter__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
 .records-count {
     font-size: var(--font-size-sm);
     color: var(--color-muted);
